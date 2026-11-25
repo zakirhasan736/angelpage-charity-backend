@@ -38,6 +38,7 @@ import {
 import { requirePanel } from "../../middlewares/adminPanel.middleware.js";
 import { validatePaymentMethod } from "../../middlewares/validation.middleware";
 import multer from "multer";
+import { requirePayments } from "../../config/payments.js";
 
 const router = Router();
 const upload = multer({ dest: "uploads/" });
@@ -99,6 +100,7 @@ router.get(
 );
 router.post(
 	"/operations/escrow/:orderId/release",
+	requirePayments,
 	authMiddleware(["ADMIN"]),
 	requirePanel("operations"),
 	releaseEscrow,

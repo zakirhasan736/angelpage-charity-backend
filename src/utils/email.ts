@@ -217,17 +217,17 @@ export const sendOrderConfirmationEmail = async ({
 	products: { name: string; charityProfit: number }[];
 }) => {
 	const productLines = products
-		.map(p => `<li>${p.name} — £${p.charityProfit.toFixed(2)} to charity</li>`)
+		.map(p => `<li>${p.name} — $${p.charityProfit.toFixed(2)} to charity</li>`)
 		.join("");
 
 	await sendEmail({
 		to: email,
 		subject: `Angelpage order confirmation #${orderId.slice(-6)}`,
-		text: `Thank you ${firstName || "customer"}. Order total £${grandTotal.toFixed(2)}. Charity donation £${charityTotal.toFixed(2)}.`,
+		text: `Thank you ${firstName || "customer"}. Order total $${grandTotal.toFixed(2)}. Charity donation $${charityTotal.toFixed(2)}.`,
 		html: `<p>Thank you ${firstName || "customer"},</p>
       <p>Your order has been confirmed.</p>
-      <p><strong>Total:</strong> £${grandTotal.toFixed(2)}</p>
-      <p><strong>Charity donation:</strong> £${charityTotal.toFixed(2)}</p>
+      <p><strong>Total:</strong> $${grandTotal.toFixed(2)}</p>
+      <p><strong>Charity donation:</strong> $${charityTotal.toFixed(2)}</p>
       <ul>${productLines}</ul>
       <p><a href="${process.env.FRONTEND_BASE_URL}/checkout/confirmation/${orderId}">View order</a></p>`,
 	});
@@ -271,9 +271,9 @@ export const sendEscrowReleasedEmail = async ({
 	await sendEmail({
 		to: email,
 		subject: `Payment released for order #${orderId.slice(-6)}`,
-		text: `Hi ${firstName || "customer"}, funds of £${grandTotal.toFixed(2)} have been released to the seller after the escrow period.`,
+		text: `Hi ${firstName || "customer"}, funds of $${grandTotal.toFixed(2)} have been released to the seller after the escrow period.`,
 		html: `<p>Hi ${firstName || "customer"},</p>
-      <p>The escrow hold on your order has ended and payment of <strong>£${grandTotal.toFixed(2)}</strong> has been released to the seller.</p>
+      <p>The escrow hold on your order has ended and payment of <strong>$${grandTotal.toFixed(2)}</strong> has been released to the seller.</p>
       <p>Thank you for supporting charity through Angelpage.</p>`,
 	});
 };

@@ -15,7 +15,7 @@ const PLATFORM_FN = {
 };
 
 const buildGalleryPayload = (item) => {
-	const base = process.env.FRONTEND_BASE_URL || "https://www.angelpage.co.uk";
+	const base = process.env.FRONTEND_BASE_URL || "https://www.angelpage.shop";
 	const shareUrl = `${base}/reels?item=${item.slug}`;
 	const isVideo = ["video", "reel"].includes(item.media?.mediaType);
 	return {

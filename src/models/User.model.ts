@@ -122,7 +122,7 @@ const userSchema = new Schema<IUser>(
 		dateBirth: { type: String },
 		verified: { type: Boolean, default: false },
 		canBlog: { type: Boolean, default: false },
-		country: { type: String, default: "United Kingdom" },
+		country: { type: String, default: "United States" },
 		addresses: [addressSchema],
 		payments: [paymentMethodSchema],
 		listedProducts: [{ type: Schema.Types.ObjectId, ref: "Product" }],

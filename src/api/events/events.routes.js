@@ -15,6 +15,7 @@ import {
 	getEventDonationReceipt,
 	confirmEventDonationFromQuery,
 } from "./events.controller";
+import { requirePayments } from "../../config/payments.js";
 
 const router = Router();
 const upload = multer({ dest: "uploads/" });
@@ -24,8 +25,8 @@ router.get("/mine", authMiddleware(["ADMIN", "CHARITY", "CHARITY_STAFF"]), getMy
 router.get("/admin/all", authMiddleware(["ADMIN"]), getAdminEvents);
 router.get("/slug/:slug", getEventBySlug);
 router.post("/:eventId/poll/vote", voteEventPoll);
-router.post("/:eventId/donations", createEventDonation);
-router.post("/donations/:donationId/confirm", confirmEventDonation);
+router.post("/:eventId/donations", requirePayments, createEventDonation);
+router.post("/donations/:donationId/confirm", requirePayments, confirmEventDonation);
 router.get("/donations/:donationId/confirm", confirmEventDonationFromQuery);
 router.get("/donations/:donationId/receipt", getEventDonationReceipt);
 router.post(

@@ -28,18 +28,19 @@ import {
 	openOrderDispute,
 } from "./orders.controller";
 import { authMiddleware } from "../../middlewares/auth.middleware";
+import { requirePayments } from "../../config/payments.js";
 
 const router = Router();
 
 // Create a new order
-router.post("/create", createOrder);
-router.post("/guest-create", createGuestOrder);
+router.post("/create", requirePayments, createOrder);
+router.post("/guest-create", requirePayments, createGuestOrder);
 router.get("/guest-confirmation/:orderId", getGuestOrderConfirmation);
 
 // creat label for order endpoint
 router.post("/orders/get-shipping-rate", getRates);
 
-router.post("/orders/:orderId/createlabel", authMiddleware(), createLabelForOrder);
+router.post("/orders/:orderId/createlabel", requirePayments, authMiddleware(), createLabelForOrder);
 
 router.get("/carrier", getCarriers);
 

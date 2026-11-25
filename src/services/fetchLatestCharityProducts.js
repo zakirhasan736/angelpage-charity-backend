@@ -330,7 +330,7 @@ async function fetchLatestCharityProducts(charityId, sellerId, maxLimit = 1000) 
       charitySeller: sellerId,
       title: p.title,
       price: p.price?.value || null,
-      currency: p.price?.currency || 'GBP',
+      currency: p.price?.currency || 'USD',
       image: p.image?.imageUrl || null,
       thumbnailImages: p.thumbnailImages?.map(t => t.imageUrl) || [],
       additionalImages: p.additionalImages?.map(a => a.imageUrl) || [],
