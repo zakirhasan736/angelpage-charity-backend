@@ -153,6 +153,12 @@ const productSchema = new Schema<IProduct>(
 	},
 	{ timestamps: true },
 );
+// Indexes for the public catalogue (thousands of products): listing pages,
+// category pages and sitemap batches all filter on these.
+productSchema.index({ status: 1, isArchived: 1, category: 1, _id: 1 });
+productSchema.index({ status: 1, isArchived: 1, createdAt: -1 });
+productSchema.index({ charity: 1, status: 1, isArchived: 1 });
+
 // Helper function to validate the number of images
 function arrayLimit(val: IProductImage[]) {
   return val.length <= 10;

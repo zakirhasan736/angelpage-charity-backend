@@ -301,16 +301,40 @@ export const getAllProducts = async (req, res) => {
 	}
 };
 
-/** Lean public product URLs for the sitemap. Does not load images or seller records. */
+/**
+ * Lean public product URLs for the sitemap: live, not archived, in stock.
+ *   ?page=&limit=            (limit ≤ 10000, default 5000)
+ *   ?category=women          one category (lets the frontend batch sitemaps by topic)
+ *   ?excludeCategories=a,b   everything outside the known categories
+ * Sorted by _id so items do not move between sitemap files when edited.
+ * Returns the first three image URLs for image sitemaps; echoes `category`
+ * so the frontend can tell this version supports filtering.
+ */
 export const getProductSitemap = async (req, res) => {
 	try {
 		const limit = Math.min(10000, Math.max(1, Number(req.query.limit) || 5000));
 		const page = Math.max(1, Number(req.query.page) || 1);
-		const filter = { status: "LIVE", isArchived: false };
+		const category = typeof req.query.category === "string" ? req.query.category.trim().toLowerCase() : "";
+		const exclude =
+			typeof req.query.excludeCategories === "string"
+				? req.query.excludeCategories
+						.split(",")
+						.map((c) => c.trim().toLowerCase())
+						.filter(Boolean)
+				: [];
+
+		const filter = {
+			status: "LIVE",
+			isArchived: false,
+			$or: [{ stockRemaining: { $gt: 0 } }, { stockRemaining: { $exists: false } }],
+		};
+		if (category) filter.category = { $regex: `^${category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
+		else if (exclude.length) filter.category = { $nin: exclude.flatMap((c) => [c, c.charAt(0).toUpperCase() + c.slice(1)]) };
+
 		const total = await Product.countDocuments(filter);
 		const products = await Product.find(filter)
-			.select("slug updatedAt")
-			.sort({ updatedAt: -1, _id: 1 })
+			.select("slug updatedAt images.url")
+			.sort({ _id: 1 })
 			.skip((page - 1) * limit)
 			.limit(limit)
 			.lean();
@@ -319,10 +343,15 @@ export const getProductSitemap = async (req, res) => {
 			products: products.map((product) => ({
 				slug: product.slug || String(product._id),
 				updatedAt: product.updatedAt,
+				images: (product.images || [])
+					.map((image) => image?.url)
+					.filter(Boolean)
+					.slice(0, 3),
 			})),
 			total,
 			page,
 			pages: Math.max(1, Math.ceil(total / limit) || 1),
+			...(category ? { category } : {}),
 		});
 	} catch (error) {
 		console.error("Error building product sitemap:", error);
@@ -563,6 +592,9 @@ export const getProductDetails = async (req, res) => {
 				color: product.color,
 				size: product.size,
 				status: product.status,
+				// lets the product page mark sold items noindex / SoldOut
+				isArchived: Boolean(product.isArchived),
+				stockRemaining: typeof product.stockRemaining === "number" ? product.stockRemaining : 1,
 				weight: product.weight,
 				dimensions: {
 					height: product.dimensions?.height || null,
