@@ -194,12 +194,12 @@ export async function applySuccessfulEventDonation(donation, { confirmedAt } = {
 		await sendEmail({
 			to: donation.donorEmail,
 			subject: `Your Angelpage donation receipt — ${donation.donationNumber}`,
-			text: `Thank you ${receipt.donorName}.\n\nDonation: £${donation.amount.toFixed(2)}\nFund: ${donation.fundLabel}\nEvent: ${donation.eventTitle}\nReceipt: ${donation.donationNumber}\nCharity: ${donation.charityName}\n\nWith gratitude,\nAngelpage`,
+			text: `Thank you ${receipt.donorName}.\n\nDonation: $${donation.amount.toFixed(2)}\nFund: ${donation.fundLabel}\nEvent: ${donation.eventTitle}\nReceipt: ${donation.donationNumber}\nCharity: ${donation.charityName}\n\nWith gratitude,\nAngelpage`,
 			html: `
         <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;border:1px solid #E8D4F4;border-radius:16px;">
           <p style="color:#611192;font-size:12px;font-weight:bold;letter-spacing:0.2em;text-transform:uppercase;">Donation Receipt</p>
           <h1 style="color:#1a1a1a;font-size:24px;margin:8px 0;">Thank you, ${receipt.donorName}</h1>
-          <p style="font-size:32px;font-weight:bold;color:#611192;margin:16px 0;">£${donation.amount.toFixed(2)}</p>
+          <p style="font-size:32px;font-weight:bold;color:#611192;margin:16px 0;">$${donation.amount.toFixed(2)}</p>
           <table style="width:100%;font-size:14px;color:#444;">
             <tr><td style="padding:6px 0;">Receipt</td><td style="text-align:right;font-weight:bold;">${donation.donationNumber}</td></tr>
             <tr><td style="padding:6px 0;">Fund</td><td style="text-align:right;">${donation.fundLabel}</td></tr>

@@ -54,7 +54,7 @@ export async function fetchEbayCuratedFeed({ limit = 50, offset = 0 } = {}) {
 		ebayItemId: item.itemId || item.legacyItemId,
 		title: item.title,
 		price: item.price?.value ? parseFloat(item.price.value) : null,
-		currency: item.price?.currency || "GBP",
+		currency: item.price?.currency || "USD",
 		imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl,
 		itemWebUrl: item.itemAffiliateWebUrl || item.itemWebUrl,
 		condition: item.condition,

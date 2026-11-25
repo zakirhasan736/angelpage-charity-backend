@@ -42,7 +42,7 @@ function buildCaption({ title, price, productUrl }) {
 	if (!hasPrice) {
 		return `${title} on Angelpage. ${productUrl}`;
 	}
-	return `${title} — £${price} on Angelpage. 90% goes to charity. ${productUrl}`;
+	return `${title} — $${price} on Angelpage. Up to 90% goes to charity. ${productUrl}`;
 }
 
 async function metaGraphPost(path, body, token) {
@@ -170,7 +170,7 @@ export async function postListingToTwitter({ title, price, productUrl }) {
 		return { platform: "twitter", skipped: true, reason: "Twitter API not configured" };
 	}
 
-	const text = `${title} — £${price} on Angelpage (90% to charity) ${productUrl}`.slice(0, 280);
+	const text = `${title} — $${price} on Angelpage (up to 90% to charity) ${productUrl}`.slice(0, 280);
 	const res = await fetch("https://api.twitter.com/2/tweets", {
 		method: "POST",
 		headers: {
@@ -195,7 +195,7 @@ export async function autoPostNewListing(product) {
 		...defaultSocialPostingPrefs(),
 		...(product.socialPosting?.toObject?.() || product.socialPosting || {}),
 	};
-	const base = process.env.FRONTEND_BASE_URL || "https://www.angelpage.co.uk";
+	const base = process.env.FRONTEND_BASE_URL || "https://www.angelpage.shop";
 	const productUrl = `${base}/product/${product._id}`;
 	const payload = {
 		title: product.name,

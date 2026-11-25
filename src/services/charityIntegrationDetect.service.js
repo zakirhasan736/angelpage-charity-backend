@@ -22,7 +22,7 @@ async function fetchSite(origin) {
 		maxRedirects: 5,
 		validateStatus: (s) => s < 500,
 		headers: {
-			"User-Agent": "AngelpageBot/1.0 (+https://angelpage.co.uk)",
+			"User-Agent": "AngelpageBot/1.0 (+https://www.angelpage.shop)",
 			Accept: "text/html,application/json",
 		},
 	});

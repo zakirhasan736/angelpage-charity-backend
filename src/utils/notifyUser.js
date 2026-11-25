@@ -50,7 +50,7 @@ export async function notifySellersOrderPaid(order) {
 			recipientId,
 			recipientType: charityId && !sellerId ? "CHARITY" : "USER",
 			notificationType: "PRODUCT_SOLD_SUCCESS",
-			message: `"${item.name}" sold — £${(item.totalProductCost || item.price * item.quantity || 0).toFixed(2)}. Funds held in escrow.`,
+			message: `"${item.name}" sold — $${(item.totalProductCost || item.price * item.quantity || 0).toFixed(2)}. Funds held in escrow.`,
 			metadata: {
 				orderId: order._id.toString(),
 				productId: item.productId?.toString?.() || item.productId,

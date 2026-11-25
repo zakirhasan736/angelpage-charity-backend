@@ -9,11 +9,11 @@ import {sendEmail} from "../../utils/email";
 import Stripe from 'stripe';
 import { v4 as uuidv4 } from 'uuid';
 import { parseSpreadsheetBuffer } from "../../utils/excel.js";
-import { toMarketCountryCode } from "../../constants/platformPolicy.js";
 import {
 	rejectsCardSecrets,
 	sanitizePaymentMethodInput,
 } from "../../utils/sanitizePayment.js";
+import { PAYMENTS_ENABLED, STRIPE_CONNECT_COUNTRY } from "../../config/payments.js";
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2020-08-27' });
 // Set up Multer for file uploads
 const upload = multer({
@@ -701,7 +701,7 @@ export const automaticMoveToHeldFunds = async () => {
 					$set: { holdDate: new Date() }, 
 				}
 			);
-			console.log(`Moved £${charity.upcomingFunds} to totalHeldFunds for charity ${charity.charityName}`);
+			console.log(`Moved $${charity.upcomingFunds} to totalHeldFunds for charity ${charity.charityName}`);
 			// Optionally, you can also send an email to notify the charity about the fund release
 			
 			if (!charity.registrationStatus === "REGISTERED") {
@@ -737,7 +737,10 @@ export const automaticMoveToHeldFunds = async () => {
 };
 
 // Run the automatic check every day
-setInterval(automaticMoveToHeldFunds, 1000 * 3600 * 24); // Runs daily
+// Daily held-funds job; idle while payments are switched off.
+setInterval(() => {
+	if (PAYMENTS_ENABLED) automaticMoveToHeldFunds();
+}, 1000 * 3600 * 24);
 
 
 
@@ -780,7 +783,7 @@ export const approveFundsRelease = async (req, res) => {
 	try {
 		await stripe.transfers.create({
 			amount: Math.round(charity.totalHeldFunds * 100),
-			currency: "gbp",
+			currency: "usd",
 			destination: charity.stripeAccountId,
 			description: `Payout for charity ${charity.name}`,
 		});
@@ -855,7 +858,7 @@ export const releaseFunds = async (charity) => {
 		}
 		await stripe.transfers.create({
 			amount: Math.round(charity.totalHeldFunds * 100),
-			currency: "gbp",
+			currency: "usd",
 			destination: charity.stripeAccountId,
 			description: `Payout for charity ${charity.charityName}`,
 		});
@@ -917,10 +920,10 @@ export const onBoarding = async (req, res) => {
 				});
 			}
 		} else {
-			// Country is fixed for the life of a Stripe account, so take it from the charity.
+			// Country is fixed for the life of a Stripe account. USA-only launch: US unless overridden.
 			const account = await stripe.accounts.create({
 				type: "express",
-				country: toMarketCountryCode(charity.country),
+				country: STRIPE_CONNECT_COUNTRY,
 				email: charity.email,
 				capabilities: { transfers: { requested: true } },
 				business_profile: /^https?:\/\//i.test(charity.websiteLink || "") ? { url: charity.websiteLink } : undefined,

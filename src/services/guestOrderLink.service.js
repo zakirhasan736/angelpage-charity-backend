@@ -41,7 +41,7 @@ export async function linkGuestOrdersToAccount(userId, email, role = "USER") {
 				name: addr.name || orders[0].guestName || user.firstName || "",
 				address: addr.address,
 				city: addr.city || "",
-				country: addr.country || "United Kingdom",
+				country: addr.country || "United States",
 				postcode: addr.postcode,
 			});
 			await user.save();

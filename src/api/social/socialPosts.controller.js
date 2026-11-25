@@ -28,7 +28,7 @@ export async function runSocialPostJob({ productId, platforms, trigger, ownerId 
 		return { skipped: true, reason: "Affiliate listings are not auto-posted" };
 	}
 
-	const base = process.env.FRONTEND_BASE_URL || "https://www.angelpage.co.uk";
+	const base = process.env.FRONTEND_BASE_URL || "https://www.angelpage.shop";
 	const payload = {
 		title: product.name,
 		price: product.price,

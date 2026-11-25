@@ -31,7 +31,7 @@ const eventDonationSchema = new Schema<IEventDonation>(
 		fundId: { type: String, required: true },
 		fundLabel: { type: String, required: true },
 		amount: { type: Number, required: true, min: 1 },
-		currency: { type: String, default: "gbp" },
+		currency: { type: String, default: "usd" },
 		donorName: { type: String, default: "Anonymous Angel" },
 		donorEmail: { type: String, required: true },
 		donorUserId: { type: Schema.Types.ObjectId, ref: "User" },

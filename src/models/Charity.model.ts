@@ -147,7 +147,7 @@ const charitySchema = new Schema<ICharity>(
 		dateBirth: { type: String, required: false },
 		verified: { type: Boolean, default: false },
 		canBlog: { type: Boolean, default: false },
-		country: { type: String, default: "United Kingdom" },
+		country: { type: String, default: "United States" },
 		addresses: [addressSchema],
 		payments: [paymentMethodSchema],
 		charityName: { type: String, required: false },

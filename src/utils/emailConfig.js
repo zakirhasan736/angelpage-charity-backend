@@ -13,7 +13,7 @@ export function validateEmailConfig() {
 		warnings.push("SENDGRID_FROM is not set.");
 	} else if (from.includes("byparticular.com") || from.includes("localhost")) {
 		warnings.push(
-			`SENDGRID_FROM=${from} — use a verified sender on angelpage.co.uk (e.g. noreply@angelpage.co.uk).`,
+			`SENDGRID_FROM=${from} — use a verified sender domain (e.g. noreply@angelpage.shop).`,
 		);
 	}
 

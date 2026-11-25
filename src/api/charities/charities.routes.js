@@ -34,6 +34,7 @@ import {
 	runCharityProductSync,
 } from "./charityIntegration.controller.js";
 import { validatePaymentMethod } from "../../middlewares/validation.middleware";
+import { requirePayments } from "../../config/payments.js";
 
 const router = Router();
 const upload = multer({ dest: "uploads/" });
@@ -81,7 +82,7 @@ router.get("/charities", getCharityList);
 router.get("/charities/:charityid", getCharityDetails);
 
 // charity onboarding
-router.post("/onboard", authMiddleware(["CHARITY", "CHARITY_STAFF"]), onBoarding);
+router.post("/onboard", requirePayments, authMiddleware(["CHARITY", "CHARITY_STAFF"]), onBoarding);
 
 // Product sync / third-party store integration
 router.get(
@@ -115,6 +116,7 @@ router.put("/orders/:orderId/deliver", authMiddleware(), OrderdeliverMark);
 //admin approved for fund release (admin only)
 router.put(
 	"/funds/release/:charityId",
+	requirePayments,
 	authMiddleware(["ADMIN", "FINANCE_ADMIN"]),
 	approveFundsRelease,
 );

@@ -452,7 +452,7 @@ export const requestPasswordReset = async (req, res) => {
 		console.error("Error sending password reset email:", error.response?.body || error.message || error);
 		const hint =
 			error.message?.includes("Failed to send")
-				? " Email could not be sent — check SENDGRID_FROM is verified on angelpage.co.uk."
+				? " Email could not be sent — check SENDGRID_FROM is a verified sender."
 				: "";
 		res.status(500).json({ message: `Failed to send password reset email.${hint}` });
 	}
