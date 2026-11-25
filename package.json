@@ -9,6 +9,7 @@
     "build": "tsc",
     "migrate:charities": "node src/migrateCharitiesToSupabase.js",
     "migrate:product-slugs": "node src/migrateProductSlugs.js",
+    "seed:blog": "node src/seedBlogPosts.js",
     "start": "node dist/server.js"
   },
   "dependencies": {
