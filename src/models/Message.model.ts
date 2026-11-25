@@ -1,0 +1,38 @@
+import mongoose from "mongoose";
+
+const MessageSchema = new mongoose.Schema({
+	conversationId: {
+		type: mongoose.Schema.Types.ObjectId,
+		ref: "Conversation",
+		required: true,
+	},
+	sender: {
+		type: mongoose.Schema.Types.ObjectId,
+		required: true,
+		refPath: "senderType",
+	},
+	senderType: {
+		type: String,
+		enum: ["User", "Charity"],
+		required: true,
+	},
+	recipient: {
+		type: mongoose.Schema.Types.ObjectId,
+		required: true,
+		refPath: "recipientType",
+	},
+	recipientType: {
+		type: String,
+		enum: ["User", "Charity"],
+		required: true,
+	},
+	content: { type: String, required: true },
+	status: { type: String, enum: ["unread", "read"], default: "unread" },
+	readAt: { type: Date, default: null },
+	createdAt: { type: Date, default: Date.now },
+});
+
+MessageSchema.index({ conversationId: 1, createdAt: -1 });
+MessageSchema.index({ recipient: 1, status: 1 });
+
+export default mongoose.model("Message", MessageSchema);

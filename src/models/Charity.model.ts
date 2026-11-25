@@ -1,0 +1,221 @@
+import mongoose, { Schema, Document } from "mongoose";
+import bcrypt from "bcryptjs";
+import { v4 as uuidv4 } from "uuid";
+
+interface IAddress {
+	type: string;
+	name: string;
+	address: string;
+	city: string;
+	country: string;
+	postcode: string;
+}
+
+interface IPaymentMethod {
+	nameAccountHolder: string;
+	stripePaymentMethodId?: string;
+	billingAddress: {
+		name: string;
+		address: string;
+		city: string;
+		country: string;
+		postCode: string;
+	};
+	useShippingAsBilling: boolean;
+}
+
+export interface ICharity extends Document {
+	firstName: string;
+	lastName: string;
+	charityName: string;
+	charityNumber: string;
+	charityID: string;
+	email: string;
+	userName: string;
+	password: string;
+	description: string;
+	websiteLink: string;
+	phoneNumber: string;
+	role: string;
+	profileImage: string;
+	charityBannerImage: string; // Use string instead of String
+	profileCompleted: boolean;
+	dateBirth: string;
+	verified: boolean;
+	canBlog?: boolean;
+	country?: string;
+	addresses: IAddress[];
+	payments: IPaymentMethod[];
+	storefrontId: string;
+	listedProducts: mongoose.Types.ObjectId[];
+	favoriteProducts: mongoose.Types.ObjectId[];
+	favoriteCharities: mongoose.Types.ObjectId[];
+	comparePassword: (password: string) => Promise<boolean>;
+	lastWelcomeBackEmailSent?: Date;
+	verificationCode?: string;
+	verificationExpiry?: Date;
+	stripeAccountId?: string; // Stripe Account ID
+	productIntegration?: {
+		productSource?: "manual" | "shopify" | "woocommerce" | "wordpress" | "scrape" | "api_key";
+		storeUrl?: string;
+		shopifyDomain?: string;
+		apiKeyEncrypted?: string;
+		apiSecretEncrypted?: string;
+		autoSync?: boolean;
+		lastSyncAt?: Date;
+		lastSyncStatus?: "idle" | "running" | "success" | "failed";
+		lastSyncError?: string;
+		lastImportedCount?: number;
+		lastUpdatedCount?: number;
+		totalSyncedProducts?: number;
+	};
+	totalEarned: number; // Total funds accumulated for charity
+	upcomingFunds: number;
+	totalHeldFunds: number; // Total funds held for payout
+	thresholdReached: boolean; // Indicates whether the charity has reached the payout threshold
+	registrationStatus: string; // The current registration status (e.g., 'PENDING', 'ACTIVE')
+	holdDate: Date;
+	adminConfirmed: boolean;
+}
+
+// Address schema for embedding
+const addressSchema = new Schema<IAddress>({
+	type: { type: String, required: true },
+	name: { type: String, required: true },
+	address: { type: String, required: true },
+	city: { type: String, required: true },
+	country: { type: String, required: true },
+	postcode: { type: String, required: true },
+});
+
+// Payment method schema — billing metadata only (no PAN/CVV)
+const paymentMethodSchema = new Schema<IPaymentMethod>({
+	nameAccountHolder: { type: String, required: true },
+	stripePaymentMethodId: { type: String, default: "" },
+	billingAddress: {
+		name: {
+			type: String,
+			required: function (this: IPaymentMethod) {
+				return !this.useShippingAsBilling;
+			},
+			default: "",
+		},
+		address: {
+			type: String,
+			required: function (this: IPaymentMethod) {
+				return !this.useShippingAsBilling;
+			},
+			default: "",
+		},
+		city: {
+			type: String,
+			required: function (this: IPaymentMethod) {
+				return !this.useShippingAsBilling;
+			},
+			default: "",
+		},
+		country: {
+			type: String,
+			required: function (this: IPaymentMethod) {
+				return !this.useShippingAsBilling;
+			},
+			default: "",
+		},
+		postCode: {
+			type: String,
+			required: function (this: IPaymentMethod) {
+				return !this.useShippingAsBilling;
+			},
+			default: "",
+		},
+	},
+	useShippingAsBilling: { type: Boolean, default: false },
+});
+
+// Charity schema definition
+const charitySchema = new Schema<ICharity>(
+	{
+		firstName: { type: String, required: true },
+		lastName: { type: String, required: true },
+		email: { type: String, unique: true, required: true },
+		userName: { type: String, required: true, unique: true },
+		password: { type: String, required: true },
+		role: { type: String, enum: ["CHARITY"], default: "CHARITY" },
+		profileImage: { type: String, default: "" },
+		charityBannerImage: { type: String, default: "" }, // Updated type
+		profileCompleted: { type: Boolean, default: false },
+		dateBirth: { type: String, required: false },
+		verified: { type: Boolean, default: false },
+		canBlog: { type: Boolean, default: false },
+		country: { type: String, default: "United Kingdom" },
+		addresses: [addressSchema],
+		payments: [paymentMethodSchema],
+		charityName: { type: String, required: false },
+		charityNumber: { type: String, required: false },
+		charityID: { type: String, required: false },
+		phoneNumber: { type: String, required: false },
+		websiteLink: { type: String, required: false },
+		description: { type: String, required: false },
+		storefrontId: { type: String, unique: true, required: false },
+		stripeAccountId: { type: String, required: false },
+		productIntegration: {
+			productSource: {
+				type: String,
+				enum: ["manual", "shopify", "woocommerce", "wordpress", "scrape", "api_key"],
+				default: "manual",
+			},
+			storeUrl: { type: String, default: "" },
+			shopifyDomain: { type: String, default: "" },
+			apiKeyEncrypted: { type: String, select: false },
+			apiSecretEncrypted: { type: String, select: false },
+			autoSync: { type: Boolean, default: true },
+			lastSyncAt: { type: Date },
+			lastSyncStatus: {
+				type: String,
+				enum: ["idle", "running", "success", "failed"],
+				default: "idle",
+			},
+			lastSyncError: { type: String, default: "" },
+			lastImportedCount: { type: Number, default: 0 },
+			lastUpdatedCount: { type: Number, default: 0 },
+			totalSyncedProducts: { type: Number, default: 0 },
+		},
+		registrationStatus: { type: String, default: "REGISTERED" },
+		totalEarned: { type: Number, default: 0 },
+		totalHeldFunds: { type: Number, default: 0 },
+		upcomingFunds: { type: Number, default: 0 },
+		thresholdReached: { type: Boolean, default: false },
+		holdDate: { type: Date, required: false },
+		adminConfirmed: { type: Boolean, default: false },
+		listedProducts: [{ type: Schema.Types.ObjectId, ref: "Product" }],
+		favoriteProducts: [
+			{ type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+		],
+		favoriteCharities: [
+			{ type: mongoose.Schema.Types.ObjectId, ref: "Charity" },
+		],
+
+		lastWelcomeBackEmailSent: Date,
+		verificationCode: { type: String },
+		verificationExpiry: { type: Date },
+	},
+	{ timestamps: true },
+);
+
+// Hash password before saving
+charitySchema.pre("save", async function (next) {
+	if (this.isNew) {
+		this.storefrontId = uuidv4();
+	}
+	if (this.isModified("password")) {
+		this.password = await bcrypt.hash(this.password, 10);
+	}
+	next();
+});
+
+// Password comparison method
+charitySchema.methods.comparePassword = async function (password: string) {
+	return bcrypt.compare(password, this.password);
+};
+
+export default mongoose.model<ICharity>("Charity", charitySchema);
