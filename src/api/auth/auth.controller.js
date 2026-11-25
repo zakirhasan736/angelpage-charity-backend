@@ -402,7 +402,10 @@ export const requestPasswordReset = async (req, res) => {
 				user = await User.findOne({ email });
 				break;
 			case "CHARITY":
-				user = await Charity.findOne({ email });
+				// Charity owners and their staff share the Charity login.
+				user =
+					(await Charity.findOne({ email })) ||
+					(await CharityStaff.findOne({ email, active: { $ne: false } }));
 				break;
 			case "ADMIN":
 				user = await Admin.findOne({ email });
@@ -424,16 +427,17 @@ export const requestPasswordReset = async (req, res) => {
 			if (!isAdminRole(user.role)) {
 				return res.status(404).json({ message: "User not found" });
 			}
-		} else if (user.role !== role) {
+		} else if (user.role !== role && !(role === "CHARITY" && user.role === "CHARITY_STAFF")) {
 			return res.status(404).json({
 				message: `No ${role} account found for this email. Try a different account type.`,
 			});
 		}
 
-		// Create a reset token with a short expiration (e.g., 15 minutes)
+		// Short-lived reset token, signed with the current password hash so it
+		// stops working as soon as the password changes (single use).
 		const resetToken = jwt.sign(
 			{ userId: user._id, role: user.role },
-			JWT_SECRET,
+			resetSecretFor(user),
 			{ expiresIn: "10m" },
 		);
 
@@ -455,32 +459,39 @@ export const requestPasswordReset = async (req, res) => {
 };
 
 
+/** Per-user secret for reset links: invalid once the password hash changes. */
+const resetSecretFor = user => `${JWT_SECRET}:${String(user.password || "").slice(-16)}`;
+
 // Reset Password
 export const resetPassword = async (req, res) => {
 	try {
 		const { token, newPassword } = req.body;
 
-		const decoded = jwt.verify(token, JWT_SECRET);
-		const { userId, role } = decoded;
-
-		let user;
-		switch (role) {
-			case "USER":
-				user = await User.findById(userId);
-				break;
-			case "CHARITY":
-				user = await Charity.findById(userId);
-				break;
-			case "ADMIN":
-				user = await Admin.findById(userId);
-				break;
-			default:
-				return res.status(400).json({ message: "Invalid role specified." });
+		const unverified = jwt.decode(token);
+		if (!unverified || typeof unverified !== "object") {
+			return res.status(400).json({ message: "Invalid or expired reset token." });
 		}
+		const { userId, role } = unverified;
+
+		if (!newPassword || String(newPassword).length < 8) {
+			return res.status(400).json({ message: "Password must be at least 8 characters." });
+		}
+
+		// The token carries the account's own role: sub-admins (OPS_ADMIN etc.)
+		// live in the Admin collection and charity staff in CharityStaff.
+		let user;
+		if (role === "USER") user = await User.findById(userId);
+		else if (role === "CHARITY") user = await Charity.findById(userId);
+		else if (role === "CHARITY_STAFF") user = await CharityStaff.findById(userId);
+		else if (isAdminRole(role)) user = await Admin.findById(userId);
+		else return res.status(400).json({ message: "Invalid role specified." });
 
 		if (!user) {
 			return res.status(404).json({ message: "User not found." });
 		}
+
+		// Throws if expired, tampered with, or already used (password changed).
+		jwt.verify(token, resetSecretFor(user));
 
 		// Directly update the password, Mongoose middleware will handle hashing
 		user.password = newPassword;

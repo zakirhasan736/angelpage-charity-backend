@@ -9,6 +9,7 @@ import {sendEmail} from "../../utils/email";
 import Stripe from 'stripe';
 import { v4 as uuidv4 } from 'uuid';
 import { parseSpreadsheetBuffer } from "../../utils/excel.js";
+import { toMarketCountryCode } from "../../constants/platformPolicy.js";
 import {
 	rejectsCardSecrets,
 	sanitizePaymentMethodInput,
@@ -895,45 +896,50 @@ export const onBoarding = async (req, res) => {
 		return res.status(403).json({ error: "Not authorized for this charity." });
 	}
 
-	const redirectUri =
-		process.env.FRONTEND_BASE_URL || "http://localhost:3000";
+	const base = process.env.FRONTEND_BASE_URL || "http://localhost:3000";
+	const dashboardUrl = `${base}/charity/account/${charityId}?tab=payouts`;
 	try {
-		// Find the charity in the database
 		const charity = await Charity.findById(charityId);
 		if (!charity) return res.status(404).json({ error: "Charity not found" });
 
-		// If the charity already has a Stripe account, return the link
-		if (charity.stripeAccountId) {
-			return res.json({
-				message: "Charity already has a Stripe account.",
-				stripeAccountId: charity.stripeAccountId,
+		let accountId = charity.stripeAccountId;
+		let created = false;
+
+		if (accountId) {
+			// Already has an account: hand back a fresh link until Stripe has the details.
+			const existing = await stripe.accounts.retrieve(accountId);
+			if (existing.details_submitted) {
+				return res.json({
+					message: "Charity already has a Stripe account.",
+					stripeAccountId: accountId,
+					detailsSubmitted: true,
+					payoutsEnabled: Boolean(existing.payouts_enabled),
+				});
+			}
+		} else {
+			// Country is fixed for the life of a Stripe account, so take it from the charity.
+			const account = await stripe.accounts.create({
+				type: "express",
+				country: toMarketCountryCode(charity.country),
+				email: charity.email,
+				capabilities: { transfers: { requested: true } },
+				business_profile: /^https?:\/\//i.test(charity.websiteLink || "") ? { url: charity.websiteLink } : undefined,
 			});
+			accountId = account.id;
+			charity.stripeAccountId = accountId;
+			await charity.save();
+			created = true;
 		}
 
-		// Create a new Stripe account for the charity
-		const account = await stripe.accounts.create({
-			type: "express",
-			country: "GB", // You can change the country based on your requirement
-			email: charity.email,
-			capabilities: { transfers: { requested: true } },
-		});
-
-		// Save the Stripe account ID in the charity document
-		charity.stripeAccountId = account.id;
-		await charity.save();
-
-		// Generate an onboarding link
 		const accountLink = await stripe.accountLinks.create({
-			account: account.id,
-			refresh_url: redirectUri,
-			return_url: redirectUri,
+			account: accountId,
+			refresh_url: `${dashboardUrl}&stripe=refresh`,
+			return_url: `${dashboardUrl}&stripe=return`,
 			type: "account_onboarding",
 		});
-		// Send email with the Onboarding URL
-		const onboardingUrl = accountLink.url;
-		await sendStripeMissingInfoEmail(charity, onboardingUrl);
-		// Return the onboarding URL to the frontend
-		res.json({ onboardingUrl: accountLink.url });
+
+		if (created) await sendStripeMissingInfoEmail(charity, accountLink.url);
+		res.json({ onboardingUrl: accountLink.url, stripeAccountId: accountId });
 	} catch (error) {
 		console.error("Error onboarding charity:", error);
 		res.status(500).json({ error: "Internal Server Error" });
