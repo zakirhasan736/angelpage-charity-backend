@@ -9,7 +9,11 @@ const socialConnectionSchema = new mongoose.Schema(
 	{
 		ownerId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
 		ownerRole: { type: String, enum: ["USER", "CHARITY", "ADMIN"], required: true },
-		provider: { type: String, enum: ["tiktok", "instagram", "youtube"], required: true },
+		provider: {
+			type: String,
+			enum: ["tiktok", "instagram", "youtube", "facebook", "linkedin", "twitter"],
+			required: true,
+		},
 		accountId: { type: String, default: "" },
 		accountName: { type: String, default: "" },
 		accountAvatar: { type: String, default: "" },
@@ -17,6 +21,8 @@ const socialConnectionSchema = new mongoose.Schema(
 		refreshTokenEncrypted: { type: String, select: false },
 		expiresAt: { type: Date },
 		scopes: [{ type: String }],
+		// e.g. the Facebook Pages granted (id, name); the first is the one we post to
+		meta: { type: mongoose.Schema.Types.Mixed, default: {} },
 	},
 	{ timestamps: true },
 );

@@ -9,14 +9,31 @@
  *   TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET           (Login Kit, scopes user.info.basic,video.list)
  *   INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET            (Instagram API with Instagram Login, instagram_business_basic)
  *   GOOGLE_YOUTUBE_CLIENT_ID, GOOGLE_YOUTUBE_CLIENT_SECRET  (falls back to GOOGLE_CLIENT_ID/SECRET; scope youtube.readonly)
- *   FACEBOOK_APP_ID + FACEBOOK_CLIENT_TOKEN           (optional: Instagram link previews via oEmbed)
+ *   FACEBOOK_APP_ID, FACEBOOK_APP_SECRET              (Facebook Login for Pages: import Page reels, post to the Page)
+ *   FACEBOOK_CLIENT_TOKEN                             (optional: Instagram link previews via oEmbed)
+ *   LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET        (Sign In with LinkedIn + Share on LinkedIn: w_member_social)
+ *   X_CLIENT_ID, X_CLIENT_SECRET                      (X OAuth 2.0, tweet.write)
  */
 
 const env = (k) => (process.env[k] || "").trim();
 const ytId = () => env("GOOGLE_YOUTUBE_CLIENT_ID") || env("GOOGLE_CLIENT_ID");
 const ytSecret = () => env("GOOGLE_YOUTUBE_CLIENT_SECRET") || env("GOOGLE_CLIENT_SECRET");
 
-export const PROVIDERS = ["tiktok", "instagram", "youtube"];
+const FB_VERSION = () => env("META_GRAPH_VERSION") || "v21.0";
+
+/** Every platform a creator can link. */
+export const PROVIDERS = ["tiktok", "instagram", "youtube", "facebook", "linkedin", "twitter"];
+/** Platforms we can pull existing short videos from. */
+export const IMPORT_PROVIDERS = ["tiktok", "instagram", "youtube", "facebook"];
+/** What each platform is used for once linked. */
+export const CAPABILITIES = {
+	tiktok: { importReels: true, postReels: true, postProducts: true },
+	instagram: { importReels: true, postReels: true, postProducts: true },
+	youtube: { importReels: true, postReels: true, postProducts: false },
+	facebook: { importReels: true, postReels: true, postProducts: true },
+	linkedin: { importReels: false, postReels: false, postProducts: true },
+	twitter: { importReels: false, postReels: false, postProducts: true },
+};
 
 export const callbackUrl = (provider) =>
 	`${env("API_PUBLIC_URL").replace(/\/$/, "")}/social-connect/${provider}/callback`;
@@ -26,6 +43,9 @@ export function isConfigured(provider) {
 	if (provider === "tiktok") return Boolean(env("TIKTOK_CLIENT_KEY") && env("TIKTOK_CLIENT_SECRET"));
 	if (provider === "instagram") return Boolean(env("INSTAGRAM_APP_ID") && env("INSTAGRAM_APP_SECRET"));
 	if (provider === "youtube") return Boolean(ytId() && ytSecret());
+	if (provider === "facebook") return Boolean(env("FACEBOOK_APP_ID") && env("FACEBOOK_APP_SECRET"));
+	if (provider === "linkedin") return Boolean(env("LINKEDIN_CLIENT_ID") && env("LINKEDIN_CLIENT_SECRET"));
+	if (provider === "twitter") return Boolean(env("X_CLIENT_ID") && env("X_CLIENT_SECRET"));
 	return false;
 }
 
@@ -54,7 +74,7 @@ export function authorizeUrl(provider, state, codeChallenge) {
 		const q = form({
 			client_key: env("TIKTOK_CLIENT_KEY"),
 			response_type: "code",
-			scope: "user.info.basic,video.list",
+			scope: "user.info.basic,video.list,video.publish",
 			redirect_uri: redirect,
 			state,
 			code_challenge: codeChallenge,
@@ -67,16 +87,48 @@ export function authorizeUrl(provider, state, codeChallenge) {
 			client_id: env("INSTAGRAM_APP_ID"),
 			redirect_uri: redirect,
 			response_type: "code",
-			scope: "instagram_business_basic",
+			scope: "instagram_business_basic,instagram_business_content_publish",
 			state,
 		});
 		return `https://www.instagram.com/oauth/authorize?${q}`;
+	}
+	if (provider === "facebook") {
+		const q = form({
+			client_id: env("FACEBOOK_APP_ID"),
+			redirect_uri: redirect,
+			state,
+			response_type: "code",
+			scope: "pages_show_list,pages_read_engagement,pages_manage_posts,business_management",
+		});
+		return `https://www.facebook.com/${FB_VERSION()}/dialog/oauth?${q}`;
+	}
+	if (provider === "linkedin") {
+		const q = form({
+			response_type: "code",
+			client_id: env("LINKEDIN_CLIENT_ID"),
+			redirect_uri: redirect,
+			state,
+			scope: "openid profile w_member_social",
+		});
+		return `https://www.linkedin.com/oauth/v2/authorization?${q}`;
+	}
+	if (provider === "twitter") {
+		const q = form({
+			response_type: "code",
+			client_id: env("X_CLIENT_ID"),
+			redirect_uri: redirect,
+			scope: "tweet.read tweet.write users.read offline.access",
+			state,
+			code_challenge: codeChallenge,
+			code_challenge_method: "S256",
+		});
+		return `https://x.com/i/oauth2/authorize?${q}`;
 	}
 	const q = form({
 		client_id: ytId(),
 		redirect_uri: redirect,
 		response_type: "code",
-		scope: "https://www.googleapis.com/auth/youtube.readonly",
+		scope: "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload",
 		access_type: "offline",
 		prompt: "consent",
 		include_granted_scopes: "true",
@@ -157,7 +209,70 @@ export async function exchangeCode(provider, code, codeVerifier) {
 			accountId: String(me.user_id || short.user_id || ""),
 			accountName: me.username ? `@${me.username}` : "Instagram account",
 			accountAvatar: me.profile_picture_url || "",
-			scopes: ["instagram_business_basic"],
+			scopes: ["instagram_business_basic", "instagram_business_content_publish"],
+		};
+	}
+
+	if (provider === "facebook") {
+		const g = `https://graph.facebook.com/${FB_VERSION()}`;
+		const short = await json(
+			await fetch(`${g}/oauth/access_token?${form({ client_id: env("FACEBOOK_APP_ID"), client_secret: env("FACEBOOK_APP_SECRET"), redirect_uri: redirect, code })}`),
+		);
+		const long = await json(
+			await fetch(`${g}/oauth/access_token?${form({ grant_type: "fb_exchange_token", client_id: env("FACEBOOK_APP_ID"), client_secret: env("FACEBOOK_APP_SECRET"), fb_exchange_token: short.access_token })}`),
+		);
+		// Page tokens derived from a long-lived user token don't expire.
+		const pages = await json(await fetch(`${g}/me/accounts?fields=id,name,access_token,picture{url}&limit=50&access_token=${encodeURIComponent(long.access_token)}`));
+		const page = pages.data?.[0];
+		if (!page) throw new Error("Pick at least one Facebook Page when connecting. Reels and posts go to a Page.");
+		return {
+			accessToken: page.access_token,
+			accountId: page.id,
+			accountName: page.name,
+			accountAvatar: page.picture?.data?.url || "",
+			scopes: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"],
+			meta: { pages: (pages.data || []).map((p) => ({ id: p.id, name: p.name })) },
+		};
+	}
+
+	if (provider === "linkedin") {
+		const t = await json(
+			await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+				body: form({ grant_type: "authorization_code", code, redirect_uri: redirect, client_id: env("LINKEDIN_CLIENT_ID"), client_secret: env("LINKEDIN_CLIENT_SECRET") }),
+			}),
+		);
+		const me = await json(await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: `Bearer ${t.access_token}` } }));
+		return {
+			accessToken: t.access_token,
+			refreshToken: t.refresh_token,
+			expiresIn: t.expires_in,
+			accountId: me.sub,
+			accountName: me.name || "LinkedIn profile",
+			accountAvatar: me.picture || "",
+			scopes: String(t.scope || "").split(/[ ,]/),
+		};
+	}
+
+	if (provider === "twitter") {
+		const basic = Buffer.from(`${env("X_CLIENT_ID")}:${env("X_CLIENT_SECRET")}`).toString("base64");
+		const t = await json(
+			await fetch("https://api.x.com/2/oauth2/token", {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${basic}` },
+				body: form({ grant_type: "authorization_code", code, redirect_uri: redirect, code_verifier: codeVerifier }),
+			}),
+		);
+		const me = await json(await fetch("https://api.x.com/2/users/me?user.fields=profile_image_url", { headers: { Authorization: `Bearer ${t.access_token}` } }));
+		return {
+			accessToken: t.access_token,
+			refreshToken: t.refresh_token,
+			expiresIn: t.expires_in,
+			accountId: me.data?.id || "",
+			accountName: me.data?.username ? `@${me.data.username}` : "X account",
+			accountAvatar: me.data?.profile_image_url || "",
+			scopes: String(t.scope || "").split(" "),
 		};
 	}
 
@@ -206,6 +321,28 @@ export async function refreshToken(provider, refresh, access) {
 					grant_type: "refresh_token",
 					refresh_token: refresh,
 				}),
+			}),
+		);
+		return { accessToken: t.access_token, refreshToken: t.refresh_token || refresh, expiresIn: t.expires_in };
+	}
+	if (provider === "twitter") {
+		const basic = Buffer.from(`${env("X_CLIENT_ID")}:${env("X_CLIENT_SECRET")}`).toString("base64");
+		const t = await json(
+			await fetch("https://api.x.com/2/oauth2/token", {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${basic}` },
+				body: form({ grant_type: "refresh_token", refresh_token: refresh }),
+			}),
+		);
+		return { accessToken: t.access_token, refreshToken: t.refresh_token || refresh, expiresIn: t.expires_in };
+	}
+	if (provider === "linkedin") {
+		if (!refresh) throw new Error("Your LinkedIn connection expired. Connect it again.");
+		const t = await json(
+			await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+				body: form({ grant_type: "refresh_token", refresh_token: refresh, client_id: env("LINKEDIN_CLIENT_ID"), client_secret: env("LINKEDIN_CLIENT_SECRET") }),
 			}),
 		);
 		return { accessToken: t.access_token, refreshToken: t.refresh_token || refresh, expiresIn: t.expires_in };
@@ -279,6 +416,30 @@ export async function listVideos(provider, accessToken, { cursor } = {}) {
 		};
 	}
 
+	if (provider === "facebook") {
+		const g = `https://graph.facebook.com/${FB_VERSION()}`;
+		const url = cursor || `${g}/me/video_reels?fields=id,description,picture,permalink_url,length,created_time&limit=25&access_token=${encodeURIComponent(accessToken)}`;
+		if (cursor && !String(cursor).startsWith("https://graph.facebook.com/")) throw new Error("Bad cursor.");
+		const r = await json(await fetch(url));
+		return {
+			items: (r.data || []).map((v) => {
+				const permalink = v.permalink_url ? (v.permalink_url.startsWith("http") ? v.permalink_url : `https://www.facebook.com${v.permalink_url}`) : `https://www.facebook.com/reel/${v.id}`;
+				return {
+					id: v.id,
+					title: (v.description || "").split("\n")[0].slice(0, 80) || "Facebook reel",
+					caption: v.description || "",
+					thumbnailUrl: v.picture || "",
+					permalink,
+					embedUrl: fbEmbed(permalink),
+					durationSec: v.length,
+					publishedAt: v.created_time,
+				};
+			}),
+			nextCursor: r.paging?.next || null,
+		};
+	}
+	if (provider !== "youtube") throw new Error("This platform doesn't support importing videos.");
+
 	const auth = { headers: { Authorization: `Bearer ${accessToken}` } };
 	const ch = await json(await fetch("https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true", auth));
 	const uploads = ch.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
@@ -321,8 +482,12 @@ export function detectProvider(rawUrl) {
 	if (host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com")) return "youtube";
 	if (host === "tiktok.com" || host.endsWith(".tiktok.com")) return "tiktok";
 	if (host === "instagram.com" || host === "instagr.am") return "instagram";
+	if (host === "facebook.com" || host === "fb.watch" || host.endsWith(".facebook.com")) return "facebook";
 	return null;
 }
+
+export const fbEmbed = (permalink) =>
+	`https://www.facebook.com/plugins/video.php?${new URLSearchParams({ href: permalink, show_text: "false", width: "476" })}`;
 
 function youtubeId(u) {
 	if (u.hostname.includes("youtu.be")) return u.pathname.slice(1).split("/")[0];
@@ -333,7 +498,7 @@ function youtubeId(u) {
 /** Resolve a public link to embed details, via each platform's oEmbed. */
 export async function resolveLink(rawUrl) {
 	const provider = detectProvider(rawUrl);
-	if (!provider) throw new Error("Paste a TikTok, Instagram or YouTube link.");
+	if (!provider) throw new Error("Paste a TikTok, Instagram, Facebook or YouTube link.");
 	const u = new URL(String(rawUrl).trim());
 
 	if (provider === "youtube") {
@@ -375,6 +540,13 @@ export async function resolveLink(rawUrl) {
 			permalink: `https://www.tiktok.com/@${o.author_unique_id || "_"}/video/${id}`,
 			embedUrl: `https://www.tiktok.com/player/v1/${id}`,
 		};
+	}
+
+	if (provider === "facebook") {
+		const id = (u.pathname.match(/\/(?:reel|videos)\/(\d+)/) || [])[1] || u.searchParams.get("v") || (u.hostname === "fb.watch" ? u.pathname.slice(1).replace(/\/$/, "") : "");
+		if (!id) throw new Error("Use the link to a single Facebook reel or video.");
+		const permalink = u.hostname === "fb.watch" ? u.toString() : /^\d+$/.test(id) ? `https://www.facebook.com/reel/${id}` : u.toString();
+		return { provider, externalId: id, title: "Facebook reel", authorName: "", thumbnailUrl: "", permalink, embedUrl: fbEmbed(permalink) };
 	}
 
 	const m = u.pathname.match(/\/(reel|reels|p|tv)\/([\w-]+)/);

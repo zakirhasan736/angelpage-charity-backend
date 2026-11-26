@@ -13,8 +13,28 @@ import {
 	queueGallerySocialPost,
 } from "../../services/gallerySocial.service.js";
 import { enqueueJob } from "../../services/jobQueue.service.js";
-import { resolveLink, listVideos, PROVIDERS } from "../../services/socialVideoProviders.service.js";
+import { resolveLink, listVideos, IMPORT_PROVIDERS } from "../../services/socialVideoProviders.service.js";
 import { accessTokenFor, ownerOf } from "../socialConnect/socialConnect.controller.js";
+import { queueCreatorSocialPost, parseCrossPost, REEL_TARGETS } from "../../services/creatorSocialPost.service.js";
+import mongoose from "mongoose";
+
+/** A product the poster is allowed to tag: their own listing (admins: any live listing). */
+const assertTaggableProduct = async (productId, req, owner) => {
+	if (!productId) return undefined;
+	if (!mongoose.isValidObjectId(productId)) {
+		const e = new Error("That product wasn't found.");
+		e.status = 400;
+		throw e;
+	}
+	const p = await Product.findById(productId).select("seller charity status");
+	const mine = p && [p.seller, p.charity].some((x) => x && String(x) === String(owner.ownerId));
+	if (!p || (!mine && !isAdminRole(req.user.role))) {
+		const e = new Error("You can only tag your own listings.");
+		e.status = 403;
+		throw e;
+	}
+	return p._id;
+};
 
 const slugify = (text) =>
 	text
@@ -211,7 +231,7 @@ export const getAdminGallery = async (req, res) => {
 export const createGalleryItem = async (req, res) => {
 	try {
 		const { userId, role } = req.user;
-		const { title, caption, kind, tags, productId, socialPosting, publishNow } =
+		const { title, caption, kind, tags, productId, socialPosting, crossPost, publishNow } =
 			req.body;
 
 		if (!title?.trim()) {
@@ -249,7 +269,7 @@ export const createGalleryItem = async (req, res) => {
 			media,
 			kind: parsedKind,
 			tags: parseTags(tags),
-			productId: productId || undefined,
+			productId: await assertTaggableProduct(productId, req, { ownerId: authorId }),
 			charityId: authorRole === "CHARITY" ? authorId : undefined,
 			authorId,
 			authorRole,
@@ -262,17 +282,21 @@ export const createGalleryItem = async (req, res) => {
 				autoPostOnPublish: true,
 				twitter: false,
 			},
+			crossPost: parseCrossPost(crossPost, REEL_TARGETS),
 		});
 
 		if (status === "published" && item.socialPosting?.autoPostOnPublish) {
 			await queueGallerySocialPost(item, isAdminRole(role) ? "admin" : "auto");
+		}
+		if (status === "published") {
+			queueCreatorSocialPost("reel", item._id).catch((e) => console.error("creator reel queue:", e.message));
 		}
 
 		res.status(201).json({ message: "Gallery item saved.", item });
 	} catch (error) {
 		cleanupFile(req.file);
 		console.error("createGalleryItem:", error);
-		res.status(500).json({ message: error.message || "Failed to create gallery item." });
+		res.status(error.status || 500).json({ message: error.message || "Failed to create gallery item." });
 	}
 };
 
@@ -288,6 +312,7 @@ export const publishGalleryItem = async (req, res) => {
 		if (item.socialPosting?.autoPostOnPublish !== false) {
 			await queueGallerySocialPost(item, "admin");
 		}
+		queueCreatorSocialPost("reel", item._id, "admin").catch((e) => console.error("creator reel queue:", e.message));
 
 		res.json({ message: "Published.", item });
 	} catch (error) {
@@ -362,7 +387,7 @@ const persistThumbnail = async (url) => {
 export const importGalleryItems = async (req, res) => {
 	try {
 		const { role } = req.user;
-		const { url, provider, videoIds, title, caption, tags, publishNow } = req.body || {};
+		const { url, provider, videoIds, title, caption, tags, publishNow, productId, productIds } = req.body || {};
 		const owner = ownerOf(req.user);
 		const authorId = owner.ownerId;
 		const authorRole = owner.ownerRole;
@@ -373,7 +398,7 @@ export const importGalleryItems = async (req, res) => {
 			const r = await resolveLink(url);
 			picked = [{ ...r, caption: "" }];
 		} else if (provider && Array.isArray(videoIds) && videoIds.length) {
-			if (!PROVIDERS.includes(provider)) return res.status(400).json({ message: "Unknown platform." });
+			if (!IMPORT_PROVIDERS.includes(provider)) return res.status(400).json({ message: "Videos can't be imported from this platform." });
 			const wanted = new Set(videoIds.map(String).slice(0, 20));
 			const token = await accessTokenFor(owner, provider);
 			// only videos that really belong to the connected account
@@ -389,6 +414,13 @@ export const importGalleryItems = async (req, res) => {
 			if (!picked.length) return res.status(404).json({ message: "Those videos weren't found on your account." });
 		} else {
 			return res.status(400).json({ message: "Paste a link or pick videos to import." });
+		}
+
+		// product tags: one for all, or per video { [videoId]: productId }
+		const tagFor = {};
+		for (const v of picked) {
+			const pid = (productIds && typeof productIds === "object" && productIds[v.externalId]) || productId;
+			tagFor[v.externalId] = await assertTaggableProduct(pid, req, owner);
 		}
 
 		const status = isAdminRole(role) && (publishNow === true || publishNow === "true") ? "published" : "pending_review";
@@ -418,7 +450,8 @@ export const importGalleryItems = async (req, res) => {
 					permalink: v.permalink,
 				},
 				kind: "reel",
-				tags: parseTags(tags).length ? parseTags(tags) : ["impact"],
+				productId: tagFor[v.externalId],
+				tags: parseTags(tags).length ? parseTags(tags) : [tagFor[v.externalId] ? "product" : "impact"],
 				charityId: authorRole === "CHARITY" ? authorId : undefined,
 				authorId,
 				authorRole,
@@ -428,6 +461,7 @@ export const importGalleryItems = async (req, res) => {
 				publishedAt: status === "published" ? new Date() : undefined,
 				// already on the platform, so no cross-posting back out
 				socialPosting: { facebook: false, instagram: false, tiktok: false, twitter: false, autoPostOnPublish: false },
+				crossPost: { tiktok: false, instagram: false, youtube: false, facebook: false },
 			});
 			created.push(item);
 		}

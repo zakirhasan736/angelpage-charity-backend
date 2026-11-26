@@ -5,6 +5,7 @@ import User from "../../models/User.model";
 import Charity from "../../models/Charity.model";
 import { parseSocialPostingInput } from "../../services/socialPosting.service.js";
 import { queueAutoPostNewListing } from "../../api/social/socialPosts.controller.js";
+import { queueCreatorSocialPost, parseCrossPost, PRODUCT_TARGETS } from "../../services/creatorSocialPost.service.js";
 import { getReviewSummaryForProduct, isAdminUser } from "./productReviews.controller.js";
 import {
 	fireMarketingEvent,
@@ -63,6 +64,7 @@ export const createProduct = async (req, res) => {
 		status,
 		quantity,
 		socialPosting,
+		crossPost,
 		sellerSharePercent,
 		fulfillmentType,
 		sellAreas,
@@ -203,9 +205,13 @@ export const createProduct = async (req, res) => {
 			status: finalStatus,
 			isArchived: false,
 			socialPosting: parseSocialPostingInput(socialPosting),
+			crossPost: parseCrossPost(crossPost, PRODUCT_TARGETS),
 		});
 
 		const savedProduct = await newProduct.save();
+		if (finalStatus === "LIVE") {
+			queueCreatorSocialPost("product", savedProduct._id).catch((err) => console.error("Creator social queue failed:", err));
+		}
 
 		// Add the product to the respective user or charity's listedProducts
 		const model = role === "USER" ? User : Charity;
@@ -699,7 +705,7 @@ export const editProduct = async (req, res) => {
 			return res.status(400).json({ message: "Cannot edit archived products" });
 		}
 
-		const { socialPosting, sellerSharePercent, fulfillmentType, sellAreas, ...rest } =
+		const { socialPosting, crossPost, sellerSharePercent, fulfillmentType, sellAreas, ...rest } =
 			req.body;
 		Object.assign(product, rest);
 		if (sellerSharePercent !== undefined) {
@@ -727,6 +733,9 @@ export const editProduct = async (req, res) => {
 		}
 		if (socialPosting !== undefined) {
 			product.socialPosting = parseSocialPostingInput(socialPosting);
+		}
+		if (crossPost !== undefined) {
+			product.crossPost = parseCrossPost(crossPost, PRODUCT_TARGETS);
 		}
 		await product.save();
 
@@ -990,6 +999,9 @@ export const reviewProduct = async (req, res) => {
 
 			queueAutoPostNewListing(product).catch((err) =>
 				console.error("Social auto-post queue failed:", err),
+			);
+			queueCreatorSocialPost("product", product._id).catch((err) =>
+				console.error("Creator social queue failed:", err),
 			);
 
 			if (product.seller) {

@@ -3,8 +3,11 @@ import SocialConnection from "../../models/SocialConnection.model.js";
 import { encryptSecret, decryptSecret } from "../../utils/credentialCrypto.js";
 import { resolveCharityId, isCharityAccountRole } from "../../utils/charityAccess.js";
 import { isAdminRole } from "../../constants/adminRoles.js";
+import Product from "../../models/Product.model";
 import {
 	PROVIDERS,
+	IMPORT_PROVIDERS,
+	CAPABILITIES,
 	isConfigured,
 	authorizeUrl,
 	exchangeCode,
@@ -45,6 +48,7 @@ export const listConnections = async (req, res) => {
 				const c = rows.find((r) => r.provider === provider);
 				return {
 					provider,
+					capabilities: CAPABILITIES[provider],
 					configured: isConfigured(provider),
 					connected: Boolean(c),
 					accountName: c?.accountName || "",
@@ -114,6 +118,7 @@ export const connectCallback = async (req, res) => {
 				...(t.refreshToken ? { refreshTokenEncrypted: encryptSecret(t.refreshToken) } : {}),
 				expiresAt: t.expiresIn ? new Date(Date.now() + Number(t.expiresIn) * 1000) : undefined,
 				scopes: t.scopes,
+				meta: t.meta || {},
 			},
 			{ upsert: true, new: true, setDefaultsOnInsert: true },
 		);
@@ -155,6 +160,7 @@ export async function accessTokenFor(owner, provider) {
 export const listMyVideos = async (req, res) => {
 	const provider = validProvider(req, res);
 	if (!provider) return;
+	if (!IMPORT_PROVIDERS.includes(provider)) return res.status(400).json({ message: "Videos can't be imported from this platform." });
 	try {
 		const token = await accessTokenFor(ownerOf(req.user), provider);
 		res.json(await listVideos(provider, token, { cursor: req.query.cursor ? String(req.query.cursor) : undefined }));
@@ -169,4 +175,45 @@ export const disconnect = async (req, res) => {
 	if (!provider) return;
 	await SocialConnection.deleteOne({ ...ownerOf(req.user), provider });
 	res.json({ success: true });
+};
+
+/** GET /social-connect/my-products?q= — listings this account can tag on a reel (admins: any live listing). */
+export const listTaggableProducts = async (req, res) => {
+	try {
+		const { ownerId } = ownerOf(req.user);
+		const q = String(req.query.q || "").trim().slice(0, 80);
+		const filter = isAdminRole(req.user.role)
+			? { status: "LIVE", isArchived: false }
+			: { $or: [{ seller: ownerId }, { charity: ownerId }], isArchived: false, status: { $in: ["LIVE", "PENDING_REVIEW", "DRAFT"] } };
+		if (q) filter.name = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+		const items = await Product.find(filter).select("name price images status slug").sort({ createdAt: -1 }).limit(60).lean();
+		res.json({
+			items: items.map((p) => ({ _id: p._id, name: p.name, price: p.price, status: p.status, slug: p.slug, image: p.images?.[0]?.url || "" })),
+		});
+	} catch (e) {
+		res.status(500).json({ message: "Could not load your listings." });
+	}
+};
+
+/**
+ * GET /social-connect/media?u=<cloudinary url> — public pass-through so TikTok
+ * can pull product photos from a domain verified in its developer portal.
+ * Only our own Cloudinary assets are served.
+ */
+export const mediaProxy = async (req, res) => {
+	try {
+		const u = new URL(String(req.query.u || ""));
+		const cloud = (process.env.CLOUDINARY_CLOUD_NAME || "").trim();
+		const ok = u.protocol === "https:" && u.hostname === "res.cloudinary.com" && (!cloud || u.pathname.startsWith(`/${cloud}/`));
+		if (!ok) return res.status(400).end();
+		const r = await fetch(u.toString());
+		if (!r.ok) return res.status(r.status).end();
+		const type = r.headers.get("content-type") || "";
+		if (!/^(image|video)\//.test(type)) return res.status(415).end();
+		res.setHeader("Content-Type", type);
+		res.setHeader("Cache-Control", "public, max-age=86400");
+		res.send(Buffer.from(await r.arrayBuffer()));
+	} catch {
+		res.status(400).end();
+	}
 };

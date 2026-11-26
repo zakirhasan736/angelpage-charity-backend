@@ -62,6 +62,13 @@ const galleryItemSchema = new mongoose.Schema(
 		publishedAt: { type: Date },
 		featured: { type: Boolean, default: false },
 		viewCount: { type: Number, default: 0 },
+		// post this reel to the author's own connected accounts when published
+		crossPost: {
+			tiktok: { type: Boolean, default: true },
+			instagram: { type: Boolean, default: true },
+			youtube: { type: Boolean, default: true },
+			facebook: { type: Boolean, default: true },
+		},
 		socialPosting: {
 			facebook: { type: Boolean, default: true },
 			instagram: { type: Boolean, default: true },

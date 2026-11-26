@@ -51,6 +51,7 @@ export interface IProduct extends Document {
 	source?: "angelpage" | "ebay_sync" | "ebay_affiliate" | "shopify_sync" | "woocommerce_sync" | "scrape_sync";
 	checkoutMode?: "stripe" | "ebay_redirect" | "affiliate_redirect";
 	isPromoted?: boolean;
+	crossPost?: Record<string, boolean>;
 	socialPosting?: {
 		facebook: boolean;
 		instagram: boolean;
@@ -144,6 +145,14 @@ const productSchema = new Schema<IProduct>(
 			default: "stripe",
 		},
 		isPromoted: { type: Boolean, default: false },
+		// post this listing to the seller's/charity's own connected accounts when it goes live
+		crossPost: {
+			facebook: { type: Boolean, default: true },
+			instagram: { type: Boolean, default: true },
+			tiktok: { type: Boolean, default: true },
+			linkedin: { type: Boolean, default: true },
+			twitter: { type: Boolean, default: true },
+		},
 		socialPosting: {
 			facebook: { type: Boolean, default: true },
 			instagram: { type: Boolean, default: true },
