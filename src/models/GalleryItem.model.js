@@ -13,6 +13,15 @@ const mediaSchema = new mongoose.Schema(
 		thumbnailUrl: { type: String, default: "" },
 		durationSec: { type: Number },
 		altText: { type: String, default: "" },
+		// where the video lives: our own upload, or embedded from a platform
+		source: {
+			type: String,
+			enum: ["upload", "tiktok", "instagram", "youtube"],
+			default: "upload",
+		},
+		externalId: { type: String, default: "" },
+		embedUrl: { type: String, default: "" },
+		permalink: { type: String, default: "" },
 	},
 	{ _id: false },
 );
@@ -66,5 +75,10 @@ const galleryItemSchema = new mongoose.Schema(
 
 galleryItemSchema.index({ status: 1, publishedAt: -1 });
 galleryItemSchema.index({ kind: 1, status: 1 });
+// one import per external video per author
+galleryItemSchema.index(
+	{ authorId: 1, "media.source": 1, "media.externalId": 1 },
+	{ unique: true, partialFilterExpression: { "media.externalId": { $gt: "" } } },
+);
 
 export default mongoose.model("GalleryItem", galleryItemSchema);

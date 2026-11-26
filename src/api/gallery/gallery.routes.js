@@ -10,6 +10,7 @@ import {
 	publishGalleryItem,
 	shareGalleryItem,
 	deleteGalleryItem,
+	importGalleryItems,
 } from "./gallery.controller.js";
 
 const router = Router();
@@ -33,6 +34,12 @@ router.post(
 	authMiddleware(["USER", "CHARITY", "CHARITY_STAFF", "ADMIN"]),
 	upload.single("media"),
 	createGalleryItem,
+);
+
+router.post(
+	"/import",
+	authMiddleware(["USER", "CHARITY", "CHARITY_STAFF", "ADMIN"]),
+	importGalleryItems,
 );
 
 router.patch("/:id/publish", authMiddleware(["ADMIN"]), publishGalleryItem);
