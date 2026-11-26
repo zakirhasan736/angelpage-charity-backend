@@ -1,5 +1,6 @@
 import Notification from "../models/Notification.model";
 import { getIO } from "../config/socket";
+import { sendNativePush, titleForType } from "../services/nativePush.service.js";
 
 /**
  * Create in-app + socket notification for a user or charity.
@@ -33,6 +34,13 @@ export async function pushNotification({
 	} catch {
 		// Socket unavailable in scripts/tests
 	}
+
+	// Native push to the iOS app (no-op until APNs is configured)
+	sendNativePush(recipientId, {
+		title: titleForType(notificationType),
+		body: message,
+		data: { type: notificationType, notificationId: String(notification._id), ...metadata },
+	}).catch(() => {});
 
 	return notification;
 }
