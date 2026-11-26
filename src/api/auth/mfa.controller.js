@@ -1,4 +1,5 @@
 import { isAdminRole } from "../../constants/adminRoles.js";
+import { qrDataUrl } from "../../utils/qr.js";
 import { modelForRole, issueSession } from "./auth.controller.js";
 import {
 	MFA_SELECT,
@@ -97,7 +98,8 @@ export const startTotpSetup = async (req, res) => {
 	user.mfa.pendingTotpSecretEncrypted = encryptSecret(secret);
 	user.markModified("mfa");
 	await user.save();
-	res.json({ secret: secret.replace(/(.{4})/g, "$1 ").trim(), otpauthUrl: otpauthUrl(secret, user.email) });
+	const url = otpauthUrl(secret, user.email);
+	res.json({ secret: secret.replace(/(.{4})/g, "$1 ").trim(), otpauthUrl: url, qrCode: qrDataUrl(url) });
 };
 
 const turnOn = async (user, method) => {
