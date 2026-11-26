@@ -8,6 +8,15 @@ export const verifyCaptcha = async (req, res, next) => {
 		return next();
 	}
 
+	// Native app: Turnstile has no iOS SDK. When MOBILE_APP_KEYS is set, a
+	// matching X-Angelpage-App-Key skips the widget (rate limits still apply).
+	// Rotate the key with each app release; App Attest is the stronger follow-up.
+	const appKeys = (process.env.MOBILE_APP_KEYS || "").split(",").map(k => k.trim()).filter(Boolean);
+	const appKey = req.get("x-angelpage-app-key");
+	if (appKey && appKeys.includes(appKey)) {
+		return next();
+	}
+
 	const token = req.body.captchaToken;
 	if (!token) {
 		return res.status(400).json({ message: "CAPTCHA verification required." });

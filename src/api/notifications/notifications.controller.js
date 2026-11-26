@@ -1,6 +1,8 @@
 import Notification from "../../models/Notification.model";
 import { getIO } from "../../config/socket";
 import { pushNotification } from "../../utils/notifyUser.js";
+import DeviceToken from "../../models/DeviceToken.model";
+import { sendNativePush, titleForType } from "../../services/nativePush.service.js";
 
 export const notificationWebhook = async (req, res) => {
 	const secret = process.env.NOTIFICATION_WEBHOOK_SECRET;
@@ -43,6 +45,11 @@ export const createNotification = async (req, res) => {
 
 		// Emit to recipient's personal room for targeted delivery
 		getIO().to(`user:${recipientId}`).emit('new-notification', notification);
+		sendNativePush(recipientId, {
+			title: titleForType(notificationType),
+			body: message,
+			data: { type: notificationType, notificationId: String(notification._id), ...(metadata || {}) },
+		}).catch(() => {});
 
 		res.status(201).json({ success: true, notification });
 	} catch (error) {
@@ -163,5 +170,40 @@ export const removeNotification = async (req, res) => {
 	} catch (error) {
 		console.error("Error removing notification:", error);
 		res.status(500).json({ error: "Failed to remove notification." });
+	}
+};
+
+// Register (or refresh) a phone for native push. Body: { token, platform, environment, appVersion, locale }
+export const registerDevice = async (req, res) => {
+	const userId = req.user?.userId;
+	const role = req.user?.role;
+	const { token, platform = "ios", environment = "production", appVersion, locale } = req.body || {};
+	if (!userId || !role) return res.status(401).json({ error: "Sign in required." });
+	if (!token || typeof token !== "string" || token.length < 32 || token.length > 512) {
+		return res.status(400).json({ error: "A valid device token is required." });
+	}
+	if (!["ios", "android"].includes(platform) || !["production", "sandbox"].includes(environment)) {
+		return res.status(400).json({ error: "Invalid platform or environment." });
+	}
+	try {
+		const device = await DeviceToken.findOneAndUpdate(
+			{ token },
+			{ userId: String(userId), role, platform, environment, appVersion, locale, lastSeenAt: new Date() },
+			{ upsert: true, new: true, setDefaultsOnInsert: true },
+		);
+		res.status(201).json({ success: true, deviceId: device._id });
+	} catch {
+		res.status(500).json({ error: "Could not register device." });
+	}
+};
+
+// Remove a phone on sign-out.
+export const unregisterDevice = async (req, res) => {
+	const userId = req.user?.userId;
+	try {
+		await DeviceToken.deleteOne({ token: req.params.token, userId: String(userId) });
+		res.json({ success: true });
+	} catch {
+		res.status(500).json({ error: "Could not remove device." });
 	}
 };

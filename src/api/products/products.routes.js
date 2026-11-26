@@ -24,6 +24,8 @@ import {
 	searchSuggest,
 	setProductPromoted,
 	updateProductSocialPosting,
+	trackAffiliateClick,
+	goToAffiliate,
 } from "./products.controller";
 import {
 	createProductReview,
@@ -68,6 +70,10 @@ router.get("/category", getCategoryProducts);
 
 // Get product details by ID
 router.get("/details/:productId", getProductDetails);
+
+// Affiliate hand-off (eBay, Amazon, partner feeds): count the click, then go
+router.get("/:productId/go", goToAffiliate);
+router.post("/:productId/affiliate-click", trackAffiliateClick);
 
 router.get("/:productId/reviews", getProductReviews);
 router.get(

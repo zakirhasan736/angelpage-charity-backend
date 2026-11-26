@@ -33,7 +33,8 @@ import { requirePayments } from "../../config/payments.js";
 const router = Router();
 
 // Create a new order
-router.post("/create", requirePayments, createOrder);
+// Signed-in checkout: the buyer is the token's user. Guests use /guest-create.
+router.post("/create", requirePayments, authMiddleware(), createOrder);
 router.post("/guest-create", requirePayments, createGuestOrder);
 router.get("/guest-confirmation/:orderId", getGuestOrderConfirmation);
 

@@ -44,6 +44,7 @@ export interface IProduct extends Document {
 	ebayAffiliateUrl?: string;
 	affiliateUrl?: string;
 	affiliatePartnerId?: string;
+	affiliateClicks?: number;
 	shopifyProductId?: string;
 	wooCommerceProductId?: string;
 	externalProductUrl?: string;
@@ -123,6 +124,7 @@ const productSchema = new Schema<IProduct>(
 		ebayAffiliateUrl: { type: String },
 		affiliateUrl: { type: String },
 		affiliatePartnerId: { type: String },
+		affiliateClicks: { type: Number, default: 0 },
 		shopifyProductId: { type: String },
 		wooCommerceProductId: { type: String },
 		externalProductUrl: { type: String },

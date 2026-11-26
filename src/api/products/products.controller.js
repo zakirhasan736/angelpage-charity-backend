@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+import { affiliateOutUrl, isAffiliateProduct } from "../../utils/affiliateUrl.js";
 // import { Request, Response } from "express";
 import Product from "../../models/Product.model";
 import { resolveCharityId, isCharityAccountRole } from "../../utils/charityAccess.js";
@@ -578,15 +580,9 @@ export const getProductDetails = async (req, res) => {
 				videos: product.videos || [],
 				checkoutMode: product.checkoutMode || "stripe",
 				ebayItemId: product.ebayItemId,
-				ebayAffiliateUrl:
-					product.ebayAffiliateUrl ||
-					(product.ebayItemId
-						? `https://www.ebay.co.uk/itm/${product.ebayItemId}${
-								process.env.EBAY_CAMPAIGN_ID
-									? `?campid=${process.env.EBAY_CAMPAIGN_ID}&customid=angelpage`
-									: ""
-							}`
-						: null),
+				ebayAffiliateUrl: product.ebayAffiliateUrl || (product.ebayItemId ? affiliateOutUrl(product) : null),
+				affiliateUrl: product.affiliateUrl || null,
+				outboundUrl: affiliateOutUrl(product),
 				isPromoted: product.isPromoted || false,
 				socialPosting: product.socialPosting,
 				reviewSummary,
@@ -1211,4 +1207,39 @@ export const bulkCreateProducts = async (req, res) => {
 		created,
 		failed,
 	});
+};
+
+/**
+ * Affiliate hand-off. Counts the click and returns (POST) or redirects to (GET)
+ * the partner URL. GET /products/:productId/go is safe to put in shares and
+ * the iOS app; POST /products/:productId/affiliate-click suits beacons.
+ */
+const findAffiliateTarget = async productId => {
+	if (!mongoose.Types.ObjectId.isValid(productId)) return null;
+	const product = await Product.findById(productId).select("affiliateUrl ebayAffiliateUrl ebayItemId checkoutMode status isArchived").lean();
+	if (!isAffiliateProduct(product)) return null;
+	Product.updateOne({ _id: productId }, { $inc: { affiliateClicks: 1 } }).catch(() => {});
+	return affiliateOutUrl(product);
+};
+
+export const trackAffiliateClick = async (req, res) => {
+	try {
+		const url = await findAffiliateTarget(req.params.productId);
+		if (!url) return res.status(404).json({ message: "Not an affiliate product." });
+		return res.json({ url });
+	} catch {
+		return res.status(500).json({ message: "Could not open the partner site." });
+	}
+};
+
+export const goToAffiliate = async (req, res) => {
+	try {
+		const url = await findAffiliateTarget(req.params.productId);
+		if (!url) return res.redirect(302, `${process.env.FRONTEND_BASE_URL || "https://www.angelpage.shop"}/product`);
+		res.set("Cache-Control", "no-store");
+		res.set("X-Robots-Tag", "noindex, nofollow");
+		return res.redirect(302, url);
+	} catch {
+		return res.status(500).json({ message: "Could not open the partner site." });
+	}
 };

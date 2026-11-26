@@ -23,6 +23,7 @@ import {
 } from "../../services/marketingJourneys.service.js";
 import { linkGuestOrdersToAccount } from "../../services/guestOrderLink.service.js";
 import { JWT_SECRET } from "../../config/jwtSecret.js";
+import { verifyIdToken } from "../../services/idTokenVerify.service.js";
 
 const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || "30m";
 const REFRESH_TOKEN_EXPIRY = process.env.REFRESH_TOKEN_EXPIRY || "7d";
@@ -739,7 +740,55 @@ export const refreshAccessToken = async (req, res) => {
 	}
 };
 
+/**
+ * Server-to-server bridge used by the website's NextAuth callback after it
+ * has verified Google/Facebook. The email in the body is trusted, so the
+ * caller must present OAUTH_BRIDGE_SECRET. Without it this would let anyone
+ * sign in as any email address.
+ */
 export const oauthLogin = async (req, res) => {
+	const secret = process.env.OAUTH_BRIDGE_SECRET;
+	const internalCall = req.oauthVerified === true;
+	if (!internalCall) {
+		if (!secret) {
+			if (process.env.NODE_ENV === "production") {
+				return res.status(503).json({ message: "Social sign-in is not configured (OAUTH_BRIDGE_SECRET)." });
+			}
+		} else if (req.get("x-angelpage-oauth-secret") !== secret) {
+			return res.status(401).json({ message: "Unauthorized." });
+		}
+	}
+	return oauthLoginCore(req, res);
+};
+
+/**
+ * Native app sign-in: POST /auth/mobile/social { provider: "apple"|"google", idToken, intendedRole, name? }
+ * The identity token is verified against Apple/Google keys before signing in.
+ */
+export const mobileSocialLogin = async (req, res) => {
+	const { provider, idToken, intendedRole = "USER", name } = req.body || {};
+	if (!["apple", "google"].includes(provider) || typeof idToken !== "string") {
+		return res.status(400).json({ message: "provider (apple|google) and idToken are required." });
+	}
+	try {
+		const identity = await verifyIdToken(provider, idToken);
+		req.body = {
+			email: identity.email,
+			// Apple only sends the name on first sign-in, from the app
+			name: identity.name || name || "",
+			image: identity.picture || "",
+			provider,
+			providerId: identity.providerId,
+			intendedRole: intendedRole === "CHARITY" ? "CHARITY" : "USER",
+		};
+		req.oauthVerified = true;
+		return oauthLoginCore(req, res);
+	} catch (e) {
+		return res.status(401).json({ message: e?.message || "Could not verify sign-in." });
+	}
+};
+
+const oauthLoginCore = async (req, res) => {
 	try {
 		const { email, name, image, provider, providerId, intendedRole = "USER" } =
 			req.body;

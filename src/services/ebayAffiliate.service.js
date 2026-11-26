@@ -35,7 +35,7 @@ export async function fetchEbayCuratedFeed({ limit = 50, offset = 0 } = {}) {
 	const res = await fetch(url.toString(), {
 		headers: {
 			Authorization: `Bearer ${token}`,
-			"X-EBAY-C-MARKETPLACE-ID": "EBAY_GB",
+			"X-EBAY-C-MARKETPLACE-ID": process.env.EBAY_MARKETPLACE_ID || "EBAY_US",
 			"X-EBAY-C-ENDUSERCTX":
 				`affiliateCampaignId=${CAMPAIGN_ID},affiliateReferenceId=${AFFILIATE_REFERENCE_ID}`,
 		},
