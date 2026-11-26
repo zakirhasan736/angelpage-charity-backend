@@ -1,5 +1,7 @@
 import express from "express";
 import {
+	registerDevice,
+	unregisterDevice,
 	createNotification,
 	getCurrentUserNotifications,
 	getAllUserNotifications,
@@ -27,6 +29,10 @@ router.get("/all", authMiddleware(), getAllUserNotifications);
 router.patch("/read-all", authMiddleware(), markAllNotificationsAsRead); 
 
 // Remove a specific notification
+// Native push devices (iOS app). Declared before /:notificationId.
+router.post("/devices", authMiddleware(), registerDevice);
+router.delete("/devices/:token", authMiddleware(), unregisterDevice);
+
 router.delete("/:notificationId", authMiddleware(), removeNotification);
 
 
