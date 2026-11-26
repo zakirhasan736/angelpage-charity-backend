@@ -19,9 +19,13 @@ import { enqueueJob } from "../../services/jobQueue.service.js";
 import { isAdminRole } from "../../constants/adminRoles.js";
 
 function resolveOwner(req) {
-	const { userId, role } = req.user;
+	const { userId, role, charityId, permissions = [] } = req.user;
 	if (role === "CHARITY" || role === "USER") {
 		return { ownerId: userId, ownerRole: role };
+	}
+	// Charity staff with the Listings permission manage their charity's affiliate feeds
+	if (role === "CHARITY_STAFF" && charityId && permissions.includes("listings")) {
+		return { ownerId: charityId, ownerRole: "CHARITY" };
 	}
 	if (isAdminRole(role)) {
 		return { ownerId: userId, ownerRole: "ADMIN" };

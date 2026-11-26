@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { accountSecurityPlugin } from "./plugins/accountSecurity.js";
 import bcrypt from "bcryptjs";
 
 // Interface for Address
@@ -139,5 +140,8 @@ adminSchema.pre("save", async function (next) {
 adminSchema.methods.comparePassword = async function (password: string) {
 	return bcrypt.compare(password, this.password);
 };
+
+// two-step sign-in, token revocation, and secrets stripped from JSON
+adminSchema.plugin(accountSecurityPlugin);
 
 export default mongoose.model<IAdmin>("Admin", adminSchema);

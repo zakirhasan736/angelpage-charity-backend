@@ -35,6 +35,7 @@ import {
 	canUserReviewProduct,
 } from "./productReviews.controller";
 import { authMiddleware } from "../../middlewares/auth.middleware";
+import { actAsCharity } from "../../middlewares/actAsCharity.middleware.js";
 
 // Configure multer for file handling
 const upload = multer({ dest: "uploads/" });
@@ -43,14 +44,14 @@ const router = Router();
 
 router.post(
 	"/bulk",
-	authMiddleware(),
+	authMiddleware(), actAsCharity,
 	bulkCreateProducts,
 );
 
 // Create a product
 router.post(
 	"/create",
-	authMiddleware(),
+	authMiddleware(), actAsCharity,
 	upload.fields([
 		{ name: "images", maxCount: 10 },
 		{ name: "videos", maxCount: 2 },
@@ -107,34 +108,34 @@ router.get("/related", getRelatedProducts);
 router.get("/related", getRelatedProducts);
 
 // Fetch user's own listings
-router.get("/mylistings", authMiddleware(), getListingProducts);
+router.get("/mylistings", authMiddleware(), actAsCharity, getListingProducts);
 
 
 
 
 // Edit a product by ID
-router.put("/:productId", authMiddleware(), editProduct);
+router.put("/:productId", authMiddleware(), actAsCharity, editProduct);
 
 router.patch(
 	"/:productId/social-posting",
-	authMiddleware(),
+	authMiddleware(), actAsCharity,
 	updateProductSocialPosting,
 );
 
 // Archive (soft delete) a product by ID
-router.patch("/:productId/archive", authMiddleware(), archiveProduct);
+router.patch("/:productId/archive", authMiddleware(), actAsCharity, archiveProduct);
 
 // Re-list an archived product
-router.patch("/:productId/relist", authMiddleware(), relistProduct);
+router.patch("/:productId/relist", authMiddleware(), actAsCharity, relistProduct);
 
 // Archive (draft product) a product by ID
-router.patch("/:productId/draft", authMiddleware(), getDraftProducts);
+router.patch("/:productId/draft", authMiddleware(), actAsCharity, getDraftProducts);
 
 // Fetch products based on user role (USER or CHARITY)
-router.get("/listings", authMiddleware(), getRoleBasedListings);
+router.get("/listings", authMiddleware(), actAsCharity, getRoleBasedListings);
 
 // Permanently delete a product by ID
-router.delete("/:productId", authMiddleware(), deleteProduct);
+router.delete("/:productId", authMiddleware(), actAsCharity, deleteProduct);
 
 // =====eBay charity products
 // router.get("/:seller", getProductsBySeller);

@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { accountSecurityPlugin } from "./plugins/accountSecurity.js";
 import bcrypt from "bcryptjs";
 import { v4 as uuidv4 } from "uuid";
 
@@ -217,5 +218,8 @@ charitySchema.pre("save", async function (next) {
 charitySchema.methods.comparePassword = async function (password: string) {
 	return bcrypt.compare(password, this.password);
 };
+
+// two-step sign-in, token revocation, and secrets stripped from JSON
+charitySchema.plugin(accountSecurityPlugin);
 
 export default mongoose.model<ICharity>("Charity", charitySchema);

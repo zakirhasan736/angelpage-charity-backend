@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { accountSecurityPlugin } from "./plugins/accountSecurity.js";
 import bcrypt from "bcryptjs";
 
 // Interface for Address
@@ -154,5 +155,8 @@ userSchema.methods.comparePassword = async function (
 ): Promise<boolean> {
 	return bcrypt.compare(password, this.password);
 };
+
+// two-step sign-in, token revocation, and secrets stripped from JSON
+userSchema.plugin(accountSecurityPlugin);
 
 export default mongoose.model<IUser>("User", userSchema);

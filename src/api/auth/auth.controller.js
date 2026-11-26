@@ -24,9 +24,21 @@ import {
 import { linkGuestOrdersToAccount } from "../../services/guestOrderLink.service.js";
 import { JWT_SECRET } from "../../config/jwtSecret.js";
 import { verifyIdToken } from "../../services/idTokenVerify.service.js";
+import crypto from "crypto";
+import { publicAccount } from "../../models/plugins/accountSecurity.js";
+import { issueChallenge, sendEmailCode, maskEmail, MFA_SELECT } from "../../services/mfa.service.js";
 
 const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || "30m";
 const REFRESH_TOKEN_EXPIRY = process.env.REFRESH_TOKEN_EXPIRY || "7d";
+
+/** Account model for a token role. */
+export const modelForRole = (role) => {
+	if (role === "USER") return User;
+	if (role === "CHARITY") return Charity;
+	if (role === "CHARITY_STAFF") return CharityStaff;
+	if (isAdminRole(role)) return Admin;
+	return null;
+};
 
 const generateAccessToken = (userId, role, extra = {}) =>
 	jwt.sign({ userId, role, type: "access", ...extra }, JWT_SECRET, {
@@ -40,6 +52,45 @@ const generateRefreshToken = (userId, role, extra = {}) =>
 
 // Backwards-compatible alias
 const generateToken = generateAccessToken;
+
+/**
+ * Tokens + safe user for a successful sign-in. `mfa: true` marks a session
+ * that passed two-step (required for admins when ADMIN_MFA_REQUIRED=true).
+ * `tv` ties refresh tokens to the account's tokenVersion.
+ */
+export const issueSession = (user, charityId, { mfa = false } = {}) => {
+	const tokenExtra = { ...buildAuthExtras(user, charityId), tv: user.tokenVersion || 0, ...(mfa ? { mfa: true } : {}) };
+	const token = generateAccessToken(user._id.toString(), user.role, tokenExtra);
+	const refreshToken = generateRefreshToken(user._id.toString(), user.role, tokenExtra);
+	return {
+		user: {
+			...publicAccount(user),
+			charityId,
+			staffRole: user.staffRole,
+			permissions: tokenExtra.permissions || [],
+		},
+		token,
+		refreshToken,
+	};
+};
+
+/** Password step passed: either a session, or a two-step challenge. */
+const finishPasswordStep = async (res, user, charityId, message) => {
+	if (user.mfa?.enabled) {
+		if (user.mfa.method === "email") {
+			const withSecrets = await user.constructor.findById(user._id).select(MFA_SELECT);
+			await sendEmailCode(withSecrets, "login");
+		}
+		return res.status(200).json({
+			mfaRequired: true,
+			mfaToken: issueChallenge(user, { charityId }),
+			method: user.mfa.method,
+			emailHint: maskEmail(user.email),
+			message: user.mfa.method === "email" ? "We emailed you a 6-digit code." : "Enter the 6-digit code from your authenticator app.",
+		});
+	}
+	return res.status(200).json({ message, ...issueSession(user, charityId) });
+};
 
 const buildAuthExtras = (user, charityId) => {
 	const extra = {};
@@ -64,9 +115,7 @@ const comparePassword = async (
   return bcrypt.compare(password, hashedPassword);
 };
  
-const generateVerificationCode = () => {
-	return Math.floor(100000 + Math.random() * 900000).toString(); // Generates a random 6-digit number
-};
+const generateVerificationCode = () => String(crypto.randomInt(100000, 1000000));
 
 
 // Register User
@@ -167,7 +216,7 @@ export const registerUser = async (req, res) => {
 
 		res.status(201).json({
 			message: "Registration successful. Please verify your email.",
-			user: newUser,
+			user: publicAccount(newUser),
 			token,
 		});
 	} catch (error) {
@@ -180,91 +229,74 @@ export const registerUser = async (req, res) => {
 
 // Verify Email (Handle Expired Codes by Allowing Resend)
 export const verifyEmail = async (req, res) => {
-  try {
-     const { email, verificationCode, role } = req.body;
+	try {
+		const { email, verificationCode } = req.body;
+		const sel = "+verificationCode +verificationExpiry +verificationAttempts";
+		const user =
+			(await User.findOne({ email }).select(sel)) ||
+			(await Charity.findOne({ email }).select(sel)) ||
+			(await Admin.findOne({ email }).select(sel));
 
-    console.log(`Verification attempt for email: ${email} with code: ${verificationCode}`);
+		if (!user) {
+			return res.status(400).json({ message: "Invalid verification code." });
+		}
+		if (user.verified && !user.verificationCode) {
+			return res.status(200).json({ message: "Email already verified." });
+		}
+		if ((user.verificationAttempts || 0) >= 5) {
+			return res.status(429).json({ message: "Too many wrong codes. Request a new code." });
+		}
+		if (!user.verificationExpiry || user.verificationExpiry < new Date()) {
+			return res.status(400).json({ message: "Verification code has expired. Please request a new code." });
+		}
+		const a = Buffer.from(String(user.verificationCode || ""));
+		const b = Buffer.from(String(verificationCode || ""));
+		if (!a.length || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+			user.verificationAttempts = (user.verificationAttempts || 0) + 1;
+			await user.save();
+			return res.status(400).json({ message: "Invalid verification code." });
+		}
 
-    // Find user by email, explicitly selecting verification fields
-    const user =
-      (await User.findOne({ email }).select('+verificationCode +verificationExpiry')) ||
-      (await Charity.findOne({ email }).select('+verificationCode +verificationExpiry')) ||
-      (await Admin.findOne({ email }).select('+verificationCode +verificationExpiry'));
+		user.verified = true;
+		user.verificationCode = undefined;
+		user.verificationExpiry = undefined;
+		user.verificationAttempts = 0;
+		await user.save();
 
-    if (!user) {
-      console.log(`User with email: ${email} not found.`);
-      return res.status(404).json({ message: "User not found." });
-    }
+		sendEmail({
+			to: user.email,
+			subject: "Email Verification Completed",
+			text: `Hello ${user.firstName || ""}, your email verification is complete.`,
+		}).catch((e) => console.error("verification-complete email:", e.message));
 
-    // Log retrieved verification fields
-    console.log(`Stored code: ${user.verificationCode}, Entered code: ${verificationCode}`);
-    console.log(`Stored expiry: ${user.verificationExpiry}, Current time: ${new Date()}`);
-
-    // Check if the verification code matches and has not expired
-    if (!user.verificationCode || user.verificationCode !== verificationCode) {
-      console.log("Verification code mismatch or undefined.");
-      return res.status(400).json({ message: "Invalid verification code." });
-    }
-
-    if (!user.verificationExpiry || user.verificationExpiry < new Date()) {
-      console.log("Verification code has expired.");
-      return res.status(400).json({ message: "Verification code has expired. Please request a new code." });
-    }
-
-    // Update user's verified status
-    user.verified = true;
-    user.verificationCode = undefined;
-    user.verificationExpiry = undefined;
-    await user.save();
-
-    // Send verification completion email
-    await sendEmail({
-      to: user.email,
-      subject: "Email Verification Completed",
-      text: `Hello ${user.firstName}, your email verification is complete.`,
-    });
-
-    res.status(200).json({ message: "Email verified successfully." });
-  } catch (error) {
-    console.error("Error verifying email:", error);
-    res.status(400).json({ message: "Error verifying email." });
-  }
+		res.status(200).json({ message: "Email verified successfully." });
+	} catch (error) {
+		console.error("Error verifying email:", error.message);
+		res.status(400).json({ message: "Error verifying email." });
+	}
 };
 
 // Resend Verification Code
 export const resendVerificationEmail = async (req, res) => {
 	try {
 		const { email } = req.body;
-
-		console.log(`Resending verification email for: ${email}`);
-
-		// Find user by email
 		const user =
 			(await User.findOne({ email })) ||
 			(await Charity.findOne({ email })) ||
 			(await Admin.findOne({ email }));
 
-		if (!user) {
-			return res.status(404).json({ message: "User not found." });
+		// Same answer whether or not the email exists
+		if (user && !user.verified) {
+			const verificationCode = generateVerificationCode();
+			user.verificationCode = verificationCode;
+			user.verificationExpiry = new Date(Date.now() + 15 * 60 * 1000);
+			user.verificationAttempts = 0;
+			await user.save();
+			await sendVerificationEmail({ email: user.email, firstName: user.firstName, verificationCode });
 		}
-
-		// Generate a new verification code
-		const verificationCode = generateVerificationCode();
-		user.verificationCode = verificationCode;
-		user.verificationExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15-minute expiry
-		await user.save();
-
-		// Send the new verification code
-		await sendVerificationEmail({
-			email: user.email,
-			firstName: user.firstName,
-			verificationCode,
-		});
-
-		console.log(`Verification code resent to: ${email}`);
-		res.status(200).json({ message: "Verification code resent successfully." });
+		res.status(200).json({ message: "If that account needs verifying, a new code is on its way." });
 	} catch (error) {
-		console.error("Error resending verification email:", error);
+		console.error("Error resending verification email:", error.message);
 		res.status(500).json({ message: "Failed to resend verification code." });
 	}
 };
@@ -326,8 +358,8 @@ export const loginUser = async (req, res) => {
 			}
 		}
 
-		// Compare the password using bcrypt
-		const isMatch = await comparePassword(password, user.password);
+		// Compare the password using bcrypt (social-only accounts may have none)
+		const isMatch = Boolean(password && user.password) && (await comparePassword(String(password), user.password));
 
 		if (!isMatch) {
 			return res.status(400).json({ message: "Invalid email or password" });
@@ -347,48 +379,11 @@ export const loginUser = async (req, res) => {
 			}
 		}
 
-		// Generate tokens
-		const tokenExtra = buildAuthExtras(user, charityId);
-		const token = generateAccessToken(
-			user._id.toString(),
-			user.role,
-			tokenExtra,
-		);
-		const refreshToken = generateRefreshToken(
-			user._id.toString(),
-			user.role,
-			tokenExtra,
-		);
-		// Send welcome back email
-		const now = new Date();
-		if (
-			!user.lastWelcomeBackEmailSent ||
-			now.getTime() - user.lastWelcomeBackEmailSent.getTime() >
-				24 * 60 * 60 * 1000
-		) {
-			// await sendWelcomeBackEmail({
-			// 	email: user.email,
-			// 	firstName: user.firstName,
-			// });
-			// // Update the timestamp for the last email sent
-			// user.lastWelcomeBackEmailSent = now;
-			await user.save();
-		}
-		res.status(200).json({
-			message: "Login successful",
-			user: {
-				...user.toObject(),
-				charityId,
-				staffRole: user.staffRole,
-				permissions: tokenExtra.permissions || [],
-			},
-			token,
-			refreshToken,
-		});
+		return finishPasswordStep(res, user, charityId, "Login successful");
 	} catch (error) {
-    console.error("Error during login:", error);
-    res.status(500).json({ message: "Login failed", error: error.message });
-  }
+		console.error("Error during login:", error.message);
+		res.status(500).json({ message: "Login failed" });
+	}
 };
 
 
@@ -415,24 +410,12 @@ export const requestPasswordReset = async (req, res) => {
 				return res.status(400).json({ message: "Invalid role specified" });
 		}
 
-		if (!user) {
-			return res.status(404).json({
-				message:
-					"No account found for this email and role. Select the correct account type (User, Charity, or Admin).",
-			});
-		}
-
-		if (role === "ADMIN" && user.role !== role) {
-			// Sub-admin roles (OPS_ADMIN, etc.) — allow reset via Admin selector
-			const { isAdminRole } = await import("../../constants/adminRoles.js");
-			if (!isAdminRole(user.role)) {
-				return res.status(404).json({ message: "User not found" });
-			}
-		} else if (user.role !== role && !(role === "CHARITY" && user.role === "CHARITY_STAFF")) {
-			return res.status(404).json({
-				message: `No ${role} account found for this email. Try a different account type.`,
-			});
-		}
+		const GENERIC = { message: "If an account exists for that email and account type, we've sent a reset link." };
+		const roleOk =
+			user &&
+			(user.role === role || (role === "ADMIN" && isAdminRole(user.role)) || (role === "CHARITY" && user.role === "CHARITY_STAFF"));
+		// Same answer either way, so the form can't be used to find out who has an account
+		if (!roleOk) return res.json(GENERIC);
 
 		// Short-lived reset token, signed with the current password hash so it
 		// stops working as soon as the password changes (single use).
@@ -448,7 +431,7 @@ export const requestPasswordReset = async (req, res) => {
 			firstName: user.firstName,
 		});
 
-		res.json({ message: "Password reset email sent" });
+		res.json({ message: "If an account exists for that email and account type, we've sent a reset link." });
 	} catch (error) {
 		console.error("Error sending password reset email:", error.response?.body || error.message || error);
 		const hint =
@@ -494,15 +477,16 @@ export const resetPassword = async (req, res) => {
 		// Throws if expired, tampered with, or already used (password changed).
 		jwt.verify(token, resetSecretFor(user));
 
-		// Directly update the password, Mongoose middleware will handle hashing
+		// Directly update the password, Mongoose middleware will handle hashing.
+		// Bumping tokenVersion signs out every other session.
 		user.password = newPassword;
+		user.tokenVersion = (user.tokenVersion || 0) + 1;
 		await user.save();
 		// Send password reset completion email
 		await sendPasswordResetCompletionEmail({
 			email: user.email,
 			firstName: user.firstName,
 		});
-		console.log("Password updated successfully for user:", userId);
 		res.status(200).json({ message: "Password reset successful." });
 	} catch (error) {
 		console.error("Error resetting password:", error);
@@ -510,49 +494,46 @@ export const resetPassword = async (req, res) => {
 	}
 };
 
+/** DELETE /auth/delete-account — closes the signed-in user's own account only. */
 export const deleteAccount = async (req, res) => {
-	const { userId, role } = req.body;
-
-	console.log('Received userId:', userId, 'Received role:', role);
-
-	if (!userId) {
-		return res.status(400).json({ message: "User ID is required" });
-	}
-
 	try {
-		let userModel;
-		switch (role) {
-			case "USER":
-				userModel = User;
-				break;
-			case "CHARITY":
-				userModel = Charity;
-				break;
-			case "ADMIN":
-				userModel = Admin;
-				break;
-			default:
-				return res.status(400).json({ message: "Invalid role specified" });
+		const { userId, role } = req.user;
+		if (role === "CHARITY_STAFF") {
+			return res.status(403).json({ message: "Staff accounts are removed by the charity owner." });
 		}
-
-		const user = await userModel.findByIdAndDelete(userId);
-		if (!user) {
-			return res.status(404).json({ message: "User not found" });
+		if (role === "SUPER_ADMIN") {
+			const others = await Admin.countDocuments({ role: "SUPER_ADMIN", _id: { $ne: userId } });
+			if (!others) return res.status(400).json({ message: "Add another super admin before closing this account." });
 		}
-
+		const Model = modelForRole(role);
+		if (!Model) return res.status(400).json({ message: "Invalid role specified" });
+		const user = await Model.findByIdAndDelete(userId);
+		if (!user) return res.status(404).json({ message: "User not found" });
 		res.json({ message: "Account deleted successfully" });
 	} catch (error) {
-		console.error("Error deleting account:", error);
-		res
-			.status(500)
-			.json({ message: "Failed to delete account", error: error.message });
+		console.error("Error deleting account:", error.message);
+		res.status(500).json({ message: "Failed to delete account" });
 	}
+};
+
+/** Profile endpoints: only your own profile (admins can look anyone up). */
+const canReadProfile = (req, email) => {
+	if (!req.user) return false;
+	if (isAdminRole(req.user.role)) return true;
+	return Boolean(req.user.email && String(req.user.email).toLowerCase() === String(email).toLowerCase());
 };
 
 // Fetch User Profile Data
 export const fetchUserProfile = async (req, res) => {
 	try {
 		const { email } = req.params;
+		if (req.user && !req.user.email) {
+			const me = await modelForRole(req.user.role)?.findById(req.user.userId).select("email");
+			req.user.email = me?.email;
+		}
+		if (!canReadProfile(req, email)) {
+			return res.status(403).json({ message: "You can only view your own profile." });
+		}
 
 		// Find user by email
 		const user =
@@ -596,8 +577,7 @@ export const fetchUserProfile = async (req, res) => {
 		}
 
 		// Return user profile data without sensitive information like password or verification codes
-		const { password, verificationCode, verificationExpiry, ...profileData } =
-			user.toObject();
+		const profileData = publicAccount(user);
 
 		res.status(200).json({
 			user: profileData,
@@ -611,6 +591,13 @@ export const fetchUserProfile = async (req, res) => {
 export const fetchCharityProfile = async (req, res) => {
 	try {
 		const { email } = req.params;
+		if (req.user && !req.user.email) {
+			const me = await modelForRole(req.user.role)?.findById(req.user.userId).select("email");
+			req.user.email = me?.email;
+		}
+		if (!canReadProfile(req, email)) {
+			return res.status(403).json({ message: "You can only view your own profile." });
+		}
 
 		// Find user by email
 		const user =
@@ -656,8 +643,7 @@ export const fetchCharityProfile = async (req, res) => {
 		}
 
 		// Return user profile data without sensitive information like password or verification codes
-		const { password, verificationCode, verificationExpiry, ...profileData } =
-			user.toObject();
+		const profileData = publicAccount(user);
 
 		res.status(200).json({
 			user: profileData,
@@ -716,9 +702,18 @@ export const refreshAccessToken = async (req, res) => {
 			return res.status(401).json({ message: "Invalid refresh token." });
 		}
 
+		// Refuse refresh tokens from before a password reset, and for deleted accounts
+		const Model = modelForRole(decoded.role);
+		const account = Model ? await Model.findById(decoded.userId).select("tokenVersion") : null;
+		if (!account || (account.tokenVersion || 0) !== (decoded.tv || 0)) {
+			return res.status(401).json({ message: "Session ended. Please sign in again." });
+		}
+
 		const tokenExtra = {
 			...(decoded.charityId ? { charityId: decoded.charityId } : {}),
 			...(decoded.permissions ? { permissions: decoded.permissions } : {}),
+			tv: decoded.tv || 0,
+			...(decoded.mfa ? { mfa: true } : {}),
 		};
 		const token = generateAccessToken(
 			decoded.userId,
@@ -832,7 +827,7 @@ const oauthLoginCore = async (req, res) => {
 				const nameParts = (name || "Angelpage User").trim().split(" ");
 				const firstName = nameParts[0] || "User";
 				const lastName = nameParts.slice(1).join(" ") || "Member";
-				const randomPassword = `${provider}-${providerId || "oauth"}-${Date.now()}`;
+				const randomPassword = crypto.randomBytes(32).toString("base64url");
 
 				user = new User({
 					email,
@@ -857,31 +852,9 @@ const oauthLoginCore = async (req, res) => {
 			}
 		}
 
-		const tokenExtra = buildAuthExtras(user, charityId);
-		const token = generateAccessToken(
-			user._id.toString(),
-			user.role,
-			tokenExtra,
-		);
-		const refreshToken = generateRefreshToken(
-			user._id.toString(),
-			user.role,
-			tokenExtra,
-		);
-
-		return res.status(200).json({
-			message: "OAuth login successful",
-			user: {
-				...user.toObject(),
-				charityId,
-				staffRole: user.staffRole,
-				permissions: tokenExtra.permissions || [],
-			},
-			token,
-			refreshToken,
-		});
+		return finishPasswordStep(res, user, charityId, "OAuth login successful");
 	} catch (error) {
-		console.error("OAuth login error:", error);
+		console.error("OAuth login error:", error.message);
 		return res.status(500).json({ message: "OAuth login failed." });
 	}
 };
