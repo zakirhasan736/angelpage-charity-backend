@@ -117,12 +117,15 @@ export async function sendNativePush(userId, msg) {
 /** Short title per notification type, shown above the message on the lock screen. */
 export const titleForType = type =>
 	({
-		PRODUCT_SOLD_SUCCESS: "You made a sale",
 		NEW_MESSAGE: "New message",
-		ORDER_SHIPPED: "Your order is on the way",
-		ORDER_DELIVERED: "Delivered",
-		PRODUCT_APPROVED: "Listing approved",
-		PRODUCT_REJECTED: "Listing needs changes",
-		PAYOUT_SENT: "Payout sent",
-		EVENT_DONATION: "New donation",
+		FAVORITE_MARKED: "Someone saved your item",
+		PRODUCT_PURCHASED: "Order confirmed",
+		PRODUCT_SHIPPED: "Your order is on the way",
+		PRODUCT_DELIVERED: "Delivered",
+		PRODUCT_SOLD_SUCCESS: "You made a sale",
+		PRODUCT_ASSIGNED_TO_CHARITY: "New item for your charity",
+		NEW_PRODUCT_POSTED: "New listing",
+		ESCROW_HOLD: "Payment held safely",
+		ESCROW_RELEASED: "Funds released",
+		PAYMENT_RELEASE: "Payout sent",
 	})[type] || "Angelpage";
