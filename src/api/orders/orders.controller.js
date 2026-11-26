@@ -96,7 +96,7 @@ export const createOrder = async (req, res) => {
 		return Math.floor(Math.random() * 1000000000); // Generates a 9-digit numeric ID
 	}
 
-	const {
+	let {
 		buyerId,
 		guestEmail,
 		guestName,
@@ -110,11 +110,15 @@ export const createOrder = async (req, res) => {
 		// totalWeight,
 		paymentConfirmedAt,
 		packageCode = "package",
-		adminAccountId = process.env.STRIPE_ADMIN_ACCOUNT_ID,
 	} = req.body;
+	// Platform account is server config only, never taken from the client.
+	const adminAccountId = process.env.STRIPE_ADMIN_ACCOUNT_ID;
+	// Signed-in orders belong to the token's user, not to a buyerId in the body.
+	if (req.user?.userId) buyerId = String(req.user.userId);
 
 	const isGuestOrder = !buyerId;
-	const resolvedShipmentCost = Number(shipmentCost) || 0;
+	// Shipping is quoted by /orders/get-shipping-rate; keep it sane until it is re-quoted here.
+	const resolvedShipmentCost = Math.min(Math.max(Number(shipmentCost) || 0, 0), 500);
 
 	try {
 		if (
@@ -146,12 +150,28 @@ export const createOrder = async (req, res) => {
 			}
 
 			const listing = await Product.findById(product.productId).select(
-				"seller charity weight dimensions sellerSharePercent fulfillmentType sellAreas",
+				"seller charity weight dimensions sellerSharePercent fulfillmentType sellAreas price status isArchived stockRemaining quantity checkoutMode name",
 			);
 			if (!listing) {
 				return res.status(400).json({
 					error: `Product not found: ${product.productId}`,
 				});
+			}
+			if (listing.status !== "LIVE" || listing.isArchived) {
+				return res.status(400).json({ error: `"${listing.name}" is no longer available.` });
+			}
+			if (listing.checkoutMode === "ebay_redirect" || listing.checkoutMode === "affiliate_redirect") {
+				return res.status(400).json({ error: `"${listing.name}" is sold on the partner site, not through Angelpage checkout.` });
+			}
+			// Price, quantity, seller and charity come from the listing, never the client.
+			const quantity = Math.max(1, Math.floor(Number(product.quantity) || 1));
+			const available = Number(listing.stockRemaining ?? listing.quantity ?? 1);
+			if (quantity > available) {
+				return res.status(400).json({ error: `Only ${available} of "${listing.name}" left.` });
+			}
+			const unitPrice = Number(listing.price);
+			if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+				return res.status(400).json({ error: `"${listing.name}" has no valid price.` });
 			}
 
 			if (!isGuestOrder) {
@@ -164,16 +184,16 @@ export const createOrder = async (req, res) => {
 				}
 			}
 
-			const charityId = product.charity || listing.charity;
+			const charityId = listing.charity;
 			if (!charityId) {
 				return res.status(400).json({
 					error: "Product is missing charity association.",
 				});
 			}
 
-			const productWeight = product.weight ?? listing.weight;
-			const productDimensions = product.dimensions ?? listing.dimensions;
-			const totalCost = product.price * product.quantity;
+			const productWeight = listing.weight ?? product.weight;
+			const productDimensions = listing.dimensions ?? product.dimensions;
+			const totalCost = Math.round(unitPrice * quantity * 100) / 100;
 			const split = calculateProfitSplit(
 				totalCost,
 				listing.sellerSharePercent ?? 0,
@@ -181,11 +201,13 @@ export const createOrder = async (req, res) => {
 			const charityProfit = split.charityProfit;
 			const adminFee = split.platformFee;
 			const sellerProfit = split.sellerProfit;
-			const totalWeight = parseFloat(productWeight || 0) * product.quantity;
+			const totalWeight = parseFloat(productWeight || 0) * quantity;
 
 			enrichedProducts.push({
 				...product,
-				seller: product.seller || listing.seller || null,
+				price: unitPrice,
+				quantity,
+				seller: listing.seller || null,
 				charity: charityId,
 				weight: productWeight,
 				totalProductCost: totalCost,
@@ -197,7 +219,7 @@ export const createOrder = async (req, res) => {
 					length: parseFloat(productDimensions?.depth || 0),
 					width: parseFloat(productDimensions?.width || 0),
 					height:
-						parseFloat(productDimensions?.height || 0) * product.quantity,
+						parseFloat(productDimensions?.height || 0) * quantity,
 				},
 			});
 		}
@@ -342,7 +364,7 @@ export const createOrder = async (req, res) => {
 				postalCode: shippingAddress.postcode,
 				country: shippingAddress.country,
 			},
-			items: products.map(product => ({
+			items: enrichedProducts.map(product => ({
 				name: product.name,
 				quantity: product.quantity,
 				unitPrice: product.price,
