@@ -20,6 +20,7 @@ import affiliateRoutes from "../api/affiliate/affiliate.routes.js";
 import socialRoutes from "../api/social/socialPosts.routes.js";
 import aiRoutes from "../api/ai/ai.routes.js";
 import galleryRoutes from "../api/gallery/gallery.routes.js";
+import socialConnectRoutes from "../api/socialConnect/socialConnect.routes.js";
 import categoriesRoutes from "../api/categories/categories.routes.js";
 
 const router = Router();
@@ -50,5 +51,6 @@ router.use("/affiliate", affiliateRoutes);
 router.use("/social", socialRoutes);
 router.use("/ai", aiRoutes);
 router.use("/gallery", galleryRoutes);
+router.use("/social-connect", socialConnectRoutes);
 
 export default router;

@@ -42,7 +42,7 @@ const socialPostLogSchema = new mongoose.Schema(
 
 			type: String,
 
-			enum: ["facebook", "instagram", "tiktok", "twitter"],
+			enum: ["facebook", "instagram", "tiktok", "twitter", "youtube", "linkedin"],
 
 			required: true,
 
@@ -57,6 +57,9 @@ const socialPostLogSchema = new mongoose.Schema(
 			default: "pending",
 
 		},
+
+		// brand = Angelpage's own pages; creator = the seller/charity's connected accounts
+		target: { type: String, enum: ["brand", "creator"], default: "brand", index: true },
 
 		trigger: {
 
