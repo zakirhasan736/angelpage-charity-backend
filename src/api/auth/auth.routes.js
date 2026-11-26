@@ -12,6 +12,7 @@ import {
 	checkToken,
 	refreshAccessToken,
 	oauthLogin,
+	mobileSocialLogin,
 	claimGuestOrders,
 } from "./auth.controller";
 import { authMiddleware } from "../../middlewares/auth.middleware";
@@ -34,6 +35,8 @@ router.post("/reset-password", resetPassword);
 router.get("/check-token", checkToken);
 router.post("/refresh", refreshAccessToken);
 router.post("/oauth", oauthLogin);
+// iOS app: Sign in with Apple / Google (identity token verified server-side)
+router.post("/mobile/social", mobileSocialLogin);
 router.post("/claim-guest-orders", authMiddleware(), claimGuestOrders);
 // Protected route
 router.delete("/delete-account", authMiddleware(), deleteAccount); // Authenticated users can delete their account
