@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { accountSecurityPlugin } from "./plugins/accountSecurity.js";
 import bcrypt from "bcryptjs";
 
 export interface ICharityStaff extends Document {
@@ -49,5 +50,8 @@ charityStaffSchema.pre("save", async function (next) {
 charityStaffSchema.methods.comparePassword = async function (password: string) {
 	return bcrypt.compare(password, this.password);
 };
+
+// two-step sign-in, token revocation, and secrets stripped from JSON
+charityStaffSchema.plugin(accountSecurityPlugin);
 
 export default mongoose.model<ICharityStaff>("CharityStaff", charityStaffSchema);

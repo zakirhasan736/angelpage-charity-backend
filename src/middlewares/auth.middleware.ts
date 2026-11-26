@@ -8,6 +8,8 @@ export interface AuthUser {
 	role: string;
 	charityId?: string;
 	permissions?: string[];
+	/** this session passed two-step sign-in */
+	mfa?: boolean;
 }
 
 export interface CustomRequest extends Request {
@@ -32,6 +34,7 @@ export const authMiddleware = (roles?: string[]) => {
 				charityId?: string;
 				permissions?: string[];
 				type?: string;
+				mfa?: boolean;
 			};
 
 			if (decoded.type === "refresh") {
@@ -44,7 +47,23 @@ export const authMiddleware = (roles?: string[]) => {
 				role: decoded.role,
 				charityId: decoded.charityId,
 				permissions: decoded.permissions || [],
+				mfa: decoded.mfa === true,
 			};
+
+			// ADMIN_MFA_REQUIRED=true: admin sessions without two-step can only
+			// reach /api/auth (to set it up); everything else answers MFA_REQUIRED.
+			if (
+				process.env.ADMIN_MFA_REQUIRED === "true" &&
+				isAdminRole(decoded.role) &&
+				decoded.mfa !== true &&
+				!String(req.originalUrl || "").startsWith("/api/auth/")
+			) {
+				res.status(403).json({
+					code: "MFA_REQUIRED",
+					message: "Admins must use two-step sign-in. Turn it on in Account settings, then sign in again.",
+				});
+				return;
+			}
 
 			if (roles) {
 				const userRole = decoded.role;
